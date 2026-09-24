@@ -1,0 +1,42 @@
+# HTTP 服务配置
+server:
+  name: ai-go-mall
+  port: 8080
+
+# 数据库配置
+database:
+  # 数据库类型：mysql / postgres 等，默认 mysql
+  # type 与 prefix 对写库与读库共享
+  type: mysql
+  # 全表前缀，例如 "mall_" 会让 GORM 自动给所有表加上前缀
+  prefix: ""
+
+  # 写库配置
+  write:
+    host: 127.0.0.1
+    port: 3306
+    username: root
+    password: "root123"
+    dbname: ai-go-mall
+
+    # 连接池配置
+    max_open_conns: 100
+    max_idle_conns: 10
+    # 连接最大存活时间，使用 Go 标准 duration 格式，例如 "1h"、"30m"、"3600s"
+    conn_max_lifetime: 1h
+    # 连接最大空闲时间，使用 Go 标准 duration 格式
+    conn_max_idle_time: 10m
+
+  # 读副本配置（可选；enabled=false 时所有读请求也走写库）
+  read:
+    enabled: false
+    host: 127.0.0.1
+    port: 3307
+    username: root
+    password: "root123"
+    dbname: ai-go-mall
+
+    max_open_conns: 50
+    max_idle_conns: 10
+    conn_max_lifetime: 1h
+    conn_max_idle_time: 10m

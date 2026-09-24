@@ -1,0 +1,73 @@
+# Air 热重载配置（v1.67+ 格式）。
+#
+# 用法：
+#   air                       # 前台跑（推荐）
+#   air -d                    # 后台跑（用 air -s 停止 / air -t 看日志）
+#
+# 工作机制：监听 include_ext 命中的文件变化 → 跑 build.cmd 重新编译 →
+# 干掉上一次的 build.entrypoint → 启动新进程。
+# 通过 [build] + [build.windows] 分平台配置，Mac/Linux 走前者，Windows 走后者。
+#:schema https://json.schemastore.org/any.json
+
+env_files = []
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = []
+  bin = "./tmp/main"
+  cmd = "go build -o ./tmp/main ./cmd/serve"
+  delay = 1000
+  entrypoint = ["./tmp/main"]
+  # 不监听这些目录里的文件。
+  exclude_dir = ["assets", "tmp", "vendor", "doc", "testdata", ".git"]
+  exclude_file = []
+  # 测试代码改动不触发重启（跑 `go test` 看结果即可）。
+  exclude_regex = ["_test\\.go"]
+  # 内容未变的文件不触发（IDE 触摸文件但未写也跳过）。
+  exclude_unchanged = true
+  follow_symlink = false
+  full_bin = ""
+  # 业务代码以外的代码改动也不需要重启时，往这里加 dir。
+  include_dir = []
+  # 监听的文件后缀。yaml / yml 让本地 .env.yaml 改动也能触发重启。
+  include_ext = ["go", "yaml", "yml", "tpl", "tmpl", "html"]
+  include_file = []
+  # 进程收尾节奏：先发 SIGINT（main.go 监听 SIGINT 走 graceful shutdown），
+  # 等 5 秒兜底 SIGKILL。
+  kill_delay = "5s"
+  log = "build-errors.log"
+  poll = false
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = true
+  stop_on_error = false
+
+  # Windows 平台：把可执行改成 .exe 后缀。其它字段继承上方。
+  [build.windows]
+    args_bin = []
+    bin = "tmp\\main.exe"
+    cmd = "go build -o tmp\\main.exe ./cmd/serve"
+    entrypoint = ["tmp\\main.exe"]
+    full_bin = ""
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  silent = false
+  time = false
+
+[misc]
+  # 退出时清掉 tmp/ 下的临时构建产物。
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

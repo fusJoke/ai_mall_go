@@ -1,0 +1,32 @@
+# ===== 构建产物 =====
+# 编译产生的二进制
+/bin/
+
+# Air 热重载构建产物
+/tmp/
+build-errors.log
+
+# 测试产物
+*.test
+*.out
+coverage.html
+
+# 依赖目录（如使用 vendor）
+/vendor/
+
+# ===== 本地配置（覆盖用，优先级最高）=====
+# 个人本地开发覆盖配置，复制 .env.yaml.example 后按需修改
+# 此文件必须在仓库中保留
+/.env.yaml
+
+# ===== 编辑器 / IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
