@@ -1,0 +1,97 @@
+// src\stores\interface\index.ts
+
+import type { RouteRecordRaw } from 'vue-router'
+
+/**
+ * 管理员信息
+ */
+export interface AdminInfo {
+    id: number
+    username: string
+    nickname: string
+    avatar: string
+    last_login_at: string
+    last_login_ip: string
+    token: string
+    // 是否是 superAdmin（用于判定是否显示超管级按钮，不做任何权限判断）
+    super: boolean
+}
+
+/**
+ * CRUD 列表模块配置
+ */
+export interface Crud {
+    syncType: 'manual' | 'auto'
+    syncedUpdate: 'yes' | 'no'
+    syncAutoPublic: 'yes' | 'no'
+}
+
+/**
+ * 多语言配置
+ */
+export interface Lang {
+    defaultLang: string
+    fallbackLang: string
+    langArray: { name: string; value: string }[]
+}
+
+/**
+ * 布局配置（颜色对：[亮色, 暗色]）
+ */
+export interface Layout {
+    // 全局
+    showDrawer: boolean
+    shrink: boolean
+    layoutMode: string
+    mainAnimation: string
+    isDark: boolean
+
+    // 菜单栏
+    menuBackground: string[]
+    menuColor: string[]
+    menuActiveBackground: string[]
+    menuActiveColor: string[]
+    menuHoverBackground: string[]
+    menuWidth: number
+    menuDefaultIcon: string
+    menuCollapse: boolean
+    menuUniqueOpened: boolean
+    menuShowTopBar: boolean
+    menuTopBarBackground: string[]
+    menuTopBarColor: string[]
+    menuTopBarCenter: boolean
+    menuTopBarLogo: boolean
+    menuToolBarAutoHide: boolean
+    menuToolBarColor: string[]
+    menuToolBarHoverColor: string[]
+    menuToolBarHoverBackground: string[]
+
+    // 主菜单栏额外配置（部分布局存在主次两个菜单栏）
+    menuBackgroundPrimary: string[]
+    menuActiveBackgroundPrimary: string[]
+
+    // 左分布局独有
+    menuWidthLeftSplit: number
+    menuHoverBackgroundLeftSplit: string[]
+
+    // 顶栏
+    headerBarTabColor: string[]
+    headerBarTabActiveColor: string[]
+    headerBarBackground: string[]
+    headerBarHoverBackground: string[]
+    headerBarTabActiveBackground: string[]
+    headerBarTabActiveBackgroundFloating: string[]
+
+    // 布局漫游式引导
+    layoutTour: boolean
+    layoutTourUnfinished: boolean
+}
+
+/**
+ * 菜单数据
+ */
+export interface Menu {
+    rawData: RouteRecordRaw[]
+    children: RouteRecordRaw[]
+    authNode: Map<string, string[]>
+}
