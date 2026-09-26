@@ -142,6 +142,7 @@ type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
 	Token    TokenConfig    `mapstructure:"token"`
+	CORS     CORSConfig     `mapstructure:"cors"`
 }
 
 // TokenConfig token 存储配置。
@@ -149,6 +150,14 @@ type Config struct {
 // 当前只支持 driver 切换；后续若加 TTL / 刷新策略等，再追加字段。
 type TokenConfig struct {
 	Driver string `mapstructure:"driver"`
+}
+
+// CORSConfig 跨域配置。
+//
+// 当前仅暴露 allow_origins；方法 / 请求头 / 预检缓存时间 / Credentials
+// 等策略固定在 internal/middleware/cors.go，未来若需可配置化再扩字段。
+type CORSConfig struct {
+	AllowOrigins []string `mapstructure:"allow_origins"`
 }
 
 // ServerConfig HTTP 服务配置。

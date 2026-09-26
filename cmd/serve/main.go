@@ -26,6 +26,7 @@ import (
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
 	"ai-go-mall/internal/infra/token"
+	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/router"
 )
 
@@ -86,7 +87,9 @@ func main() {
 // 单测不传以避免对全局 *gorm.DB 的依赖）。
 func newRouter(serverName string, extraMW ...gin.HandlerFunc) http.Handler {
 	r := gin.New()
-	mw := []gin.HandlerFunc{gin.Logger(), gin.Recovery()}
+	// 中间件顺序：Logger / Recovery 兜底 → CORS 处理跨域 → DB 中间件接入 *gorm.DB → 业务路由。
+	// CORS 插在 DB 之前：OPTIONS 预检无需 DB 上下文，且业务路由前 CORS 头已就绪。
+	mw := []gin.HandlerFunc{gin.Logger(), gin.Recovery(), middleware.CORS()}
 	mw = append(mw, extraMW...)
 	r.Use(mw...)
 

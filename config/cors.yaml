@@ -1,0 +1,13 @@
+# CORS 跨域配置
+#
+# allow_origins 是允许跨域访问的来源（Origin）域名白名单。
+# - 来源形如 "https://admin.example.com"（含协议；不带尾部斜杠；不带路径）
+# - host 部分按小写精确匹配；大小写不一致视为不同来源
+# - 端口必须显式写（"http://localhost:3000" 与 "http://localhost:80" 视为不同）
+# - 通配子域需在代码层启用 AllowWildcard 才会生效（当前未启用）
+# - 空数组 = 不允许任何来源跨域（最严格默认；开发联调请在 .env.yaml 覆盖）
+#
+# 方法 / 请求头 / 预检缓存时间固定在 internal/middleware/cors.go，
+# 当前不开放 yaml 配置；如确有需要可后续扩展。
+cors:
+  allow_origins: []
