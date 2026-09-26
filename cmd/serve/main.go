@@ -25,6 +25,7 @@ import (
 
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
+	"ai-go-mall/internal/infra/token"
 	"ai-go-mall/internal/router"
 )
 
@@ -36,6 +37,9 @@ func main() {
 	}
 	if err := database.Init(); err != nil {
 		log.Fatalf("init database: %v", err)
+	}
+	if err := token.Init(); err != nil {
+		log.Fatalf("init token: %v", err)
 	}
 	cfg := config.Get()
 

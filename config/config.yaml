@@ -40,3 +40,8 @@ database:
     max_idle_conns: 10
     conn_max_lifetime: 1h
     conn_max_idle_time: 10m
+
+# token 配置
+token:
+  # 存储驱动：database（默认） / 后续可加 redis
+  driver: database

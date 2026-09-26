@@ -141,6 +141,14 @@ func collectConfigFiles(entries []os.DirEntry) []string {
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
+	Token    TokenConfig    `mapstructure:"token"`
+}
+
+// TokenConfig token 存储配置。
+//
+// 当前只支持 driver 切换；后续若加 TTL / 刷新策略等，再追加字段。
+type TokenConfig struct {
+	Driver string `mapstructure:"driver"`
 }
 
 // ServerConfig HTTP 服务配置。
@@ -184,5 +192,8 @@ type DBReadConfig struct {
 func (c *Config) applyDefaults() {
 	if c.Database.Type == "" {
 		c.Database.Type = "mysql"
+	}
+	if c.Token.Driver == "" {
+		c.Token.Driver = "database"
 	}
 }

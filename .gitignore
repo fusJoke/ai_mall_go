@@ -19,6 +19,10 @@ coverage.html
 /web/node_modules/
 /web/dist/
 
+# 根目录不应直接存在前端 manifest（仅 web/ 目录允许）
+/package.json
+/package-lock.json
+
 # ===== 本地配置（覆盖用，优先级最高）=====
 # 个人本地开发覆盖配置，复制 .env.yaml.example 后按需修改
 # 此文件必须在仓库中保留
