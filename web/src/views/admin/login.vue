@@ -96,8 +96,11 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Eye, EyeOff, Mail, Sparkles } from '@lucide/vue'
 import AnimatedCharacters from './components/AnimatedCharacters.vue'
+import { login } from '/@/api/admin'
+import { useAdminInfo } from '/@/stores/adminInfo'
 
 withDefaults(defineProps<{
     brandName?: string
@@ -115,9 +118,8 @@ withDefaults(defineProps<{
     showGoogleLogin: false,
 })
 
-const emit = defineEmits<{
-    submit: [payload: { email: string; password: string; remember: boolean }]
-}>()
+const router = useRouter()
+const adminInfo = useAdminInfo()
 
 const showPassword = ref(false)
 const email = ref('')
@@ -137,13 +139,37 @@ defineExpose({
     },
 })
 
-function onSubmit() {
+async function onSubmit() {
     errorMsg.value = ''
-    emit('submit', {
-        email: email.value,
-        password: password.value,
-        remember: remember.value,
-    })
+    loading.value = true
+    try {
+        // 页面变量暂叫 email；后端 LoginRequest 字段叫 username，此处映射。
+        const { data } = await login({
+            username: email.value,
+            password: password.value,
+            remember: remember.value,
+        })
+
+        // 1) 先存 token
+        adminInfo.setToken(data.token)
+        // 2) 再填其余字段（dataFill 默认 exclude token，避免被覆盖）
+        adminInfo.dataFill({
+            id: data.admin.id,
+            username: data.admin.username,
+            nickname: data.admin.nickname,
+            avatar: data.admin.avatar,
+            last_login_at: data.admin.last_login_at ?? '',
+            last_login_ip: data.admin.last_login_ip ?? '',
+            super: false,
+        })
+
+        // 3) 跳转 /admin —— /admin redirect 到 /admin/loading，由 loading 视图决定下一步
+        await router.push('/admin')
+    } catch (err) {
+        errorMsg.value = (err as Error)?.message || '登录失败，请重试'
+    } finally {
+        loading.value = false
+    }
 }
 </script>
 

@@ -18,6 +18,34 @@ export interface AdminInfo {
 }
 
 /**
+ * 管理员登录请求体 —— 与后端 internal/handler/admin/admin.go LoginRequest 对齐。
+ */
+export interface LoginRequest {
+    username: string
+    password: string
+    remember: boolean
+}
+
+/**
+ * 管理员登录响应 —— 与后端 internal/handler/admin/admin.go LoginResponse 对齐。
+ */
+export interface LoginResponse {
+    admin: {
+        id: number
+        username: string
+        nickname: string
+        avatar: string
+        email?: string
+        mobile?: string
+        last_login_at?: string
+        last_login_ip?: string
+        bio?: string
+        status?: number
+    }
+    token: string
+}
+
+/**
  * CRUD 列表模块配置
  */
 export interface Crud {
