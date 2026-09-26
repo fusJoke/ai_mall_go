@@ -41,12 +41,16 @@ func NewHandler(svc adminSvc.Service) *Handler {
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
+
+	// Remember "记住我"：true → token 有效期 30 天；false（缺省）→ 3 天。
+	// 前端不传时 Go 零值是 false，无需 omitempty。
+	Remember bool `json:"remember"`
 }
 
 // LoginResponse 是登录成功后的返回。
 //
 // 注意：adminInfo 故意不包含 Password / LoginFailure 等敏感字段，由本方法显式挑选。
-// token 字段当前是占位（"stub-token"），真实实现由 token 包出 JWT / Session。
+// Token 字段由 service 层签发，handler 原样回传（明文 token 一次性下发，前端自行保管）。
 type LoginResponse struct {
 	Admin adminInfo `json:"admin"`
 	Token string    `json:"token"`
@@ -75,7 +79,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	adm, err := h.svc.Login(c, req.Username, req.Password)
+	adm, rawToken, err := h.svc.Login(c, req.Username, req.Password, req.Remember)
 	if err != nil {
 		switch {
 		case errors.Is(err, adminSvc.ErrInvalidCredentials):
@@ -90,7 +94,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, LoginResponse{
 		Admin: toAdminInfo(adm),
-		Token: "stub-token", // TODO: 换成 internal/infra/token 的产物
+		Token: rawToken,
 	})
 }
 

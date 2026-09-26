@@ -15,13 +15,15 @@ import (
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/router/registry"
 	adminService "ai-go-mall/internal/service/admin"
+	"ai-go-mall/internal/infra/token"
 )
 
-// 在包加载期一次性把 admin 的 repo → service → handler 链路接好。
+// 在包加载期一次性把 admin 的 repo → tokenMgr → service → handler 链路接好。
 // router 层持有依赖装配逻辑，业务包保持纯净（不感知 HTTP）。
 var (
 	adminRepoInstance    = adminRepo.NewRepository()
-	adminServiceInstance = adminService.NewService(adminRepoInstance)
+	adminTokenInstance   = token.Get()
+	adminServiceInstance = adminService.NewService(adminRepoInstance, adminTokenInstance)
 	adminHandlerInstance = adminHandler.NewHandler(adminServiceInstance)
 )
 
