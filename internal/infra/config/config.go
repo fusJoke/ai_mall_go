@@ -106,6 +106,11 @@ func Reset() {
 	viper.Reset()
 }
 
+// SetForTest 注入测试用配置。仅供测试代码使用，生产代码不应调用。
+func SetForTest(c *Config) {
+	cfg = c
+}
+
 // collectConfigFiles 从目录条目中筛选可加载的 yaml 配置名（保留扩展名）。
 // 后缀为 ".example" 的文件视为模板，直接跳过。
 //
@@ -143,6 +148,7 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Token    TokenConfig    `mapstructure:"token"`
 	CORS     CORSConfig     `mapstructure:"cors"`
+	Captcha  CaptchaConfig  `mapstructure:"captcha"`
 }
 
 // TokenConfig token 存储配置。
@@ -150,6 +156,26 @@ type Config struct {
 // 当前只支持 driver 切换；后续若加 TTL / 刷新策略等，再追加字段。
 type TokenConfig struct {
 	Driver string `mapstructure:"driver"`
+}
+
+// CaptchaConfig 点选验证码配置。
+//
+// 所有字段均必须由 captcha.yaml 提供；缺失即视为配置错误，由调用方报错。
+// 不在 applyDefaults 里硬编码兜底，避免"代码默认值"和"yaml 配置"两处真相。
+type CaptchaConfig struct {
+	Elements    []string `mapstructure:"元素"`
+	Length      int      `mapstructure:"长度"`
+	NoiseLength int      `mapstructure:"混淆点长度"`
+	TTLSeconds  int      `mapstructure:"过期时间"`
+
+	// BackgroundDir 背景图目录（含 1.png / 2.png 等）。
+	BackgroundDir string `mapstructure:"背景图目录"`
+
+	// IconDir ICON 图目录（含 *.png，文件名即元素名）。
+	IconDir string `mapstructure:"ICON目录"`
+
+	// FontPath 字体文件绝对或相对路径（项目根目录的相对路径）。
+	FontPath string `mapstructure:"字体路径"`
 }
 
 // CORSConfig 跨域配置。
@@ -205,4 +231,6 @@ func (c *Config) applyDefaults() {
 	if c.Token.Driver == "" {
 		c.Token.Driver = "database"
 	}
+	// CaptchaConfig 不做兜底：所有字段必须由 captcha.yaml 显式提供。
+	// 缺失字段由使用方（infra/captcha）做语义级校验并返回 ErrInvalidInput。
 }

@@ -1,0 +1,16 @@
+captcha:
+  # 点选验证码可选元素类型（按需启用，至少 1 种）
+  元素:
+    - 中文文字
+    - 英文大写字母
+    - ICON
+  # 正确答案元素个数
+  长度: 2
+  # 干扰元素个数
+  混淆点长度: 2
+  # 验证码过期时间（秒）
+  过期时间: 600
+  # 资源路径（相对项目根目录，运行时按工作目录解析）
+  背景图目录: asset/captcha/click/background
+  ICON目录: asset/captcha/click/icon
+  字体路径: asset/font/SourceHanSansCN-Normal.ttf
