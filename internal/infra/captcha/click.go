@@ -45,10 +45,11 @@ import (
 )
 
 // 元素类型常量（与 yaml 元素字段对应）。
+// CN / EN 取自 ISO 国别代码（i18n 惯例），比 Chi / Eng 更明确。
 const (
-	ElementChinese      = "中文文字"
-	ElementEnglishUpper = "英文大写字母"
-	ElementIcon         = "ICON"
+	ElementCN      = "中文文字"
+	ElementENUpper = "英文大写字母"
+	ElementIcon    = "ICON"
 )
 
 // 渲染常量。
@@ -71,12 +72,13 @@ type placedRect struct {
 	x, y, w, h int // 左上角 + 尺寸
 }
 
-// configSnapshot 是 Manager 持有的配置副本（与全局 config 解耦）。
-type configSnapshot struct {
+// configSnap 是 Manager 持有的配置副本（与全局 config 解耦）。
+type configSnap struct {
 	Elements      []string
 	Length        int
 	NoiseLength   int
 	TTLSeconds    int
+	ChineseChars  []string
 	BackgroundDir string
 	IconDir       string
 	FontPath      string
@@ -99,8 +101,8 @@ type ClickCaptcha struct {
 	Height   int
 }
 
-// VerifyRequest 是 VerifyClick 的入参；Answer 是用户按点击顺序提交的元素名。
-type VerifyRequest struct {
+// VerifyReq 是 VerifyClick 的入参；Answer 是用户按点击顺序提交的元素名。
+type VerifyReq struct {
 	Key    string   `json:"key"`
 	Answer []string `json:"answer"`
 }
@@ -108,7 +110,7 @@ type VerifyRequest struct {
 // Manager 是 captcha 业务的对外门面。
 type Manager struct {
 	repo captchaRepo.Repository
-	cfg  configSnapshot
+	cfg  configSnap
 }
 
 var (
@@ -128,7 +130,7 @@ func GetManager() (*Manager, error) {
 		return mgr, nil
 	}
 
-	snap, err := loadConfigSnapshot()
+	snap, err := loadConfigSnap()
 	if err != nil {
 		return nil, err
 	}
@@ -148,38 +150,51 @@ func Reset() {
 	mgr = nil
 }
 
-func loadConfigSnapshot() (configSnapshot, error) {
+func loadConfigSnap() (configSnap, error) {
 	globalCfg := config.Get()
 	if globalCfg == nil {
-		return configSnapshot{}, fmt.Errorf("%w: config not initialized", ErrInternal)
+		return configSnap{}, fmt.Errorf("%w: config not initialized", ErrInternal)
 	}
 	cc := globalCfg.Captcha
 
 	allowed := map[string]struct{}{
-		ElementChinese:      {},
-		ElementEnglishUpper: {},
-		ElementIcon:         {},
+		ElementCN:      {},
+		ElementENUpper: {},
+		ElementIcon:    {},
 	}
 	for _, e := range cc.Elements {
 		if _, ok := allowed[e]; !ok {
-			return configSnapshot{}, fmt.Errorf("%w: %q", ErrInvalidElement, e)
+			return configSnap{}, fmt.Errorf("%w: %q", ErrInvalidElem, e)
 		}
 	}
 	if cc.Length <= 0 || cc.NoiseLength <= 0 {
-		return configSnapshot{}, fmt.Errorf("%w: 长度/混淆点长度 must be positive", ErrInvalidInput)
+		return configSnap{}, fmt.Errorf("%w: 长度/混淆点长度 must be positive", ErrInvalidInput)
 	}
 	if cc.TTLSeconds <= 0 {
-		return configSnapshot{}, fmt.Errorf("%w: 过期时间 must be positive", ErrInvalidInput)
+		return configSnap{}, fmt.Errorf("%w: 过期时间 must be positive", ErrInvalidInput)
 	}
 	if cc.BackgroundDir == "" || cc.IconDir == "" || cc.FontPath == "" {
-		return configSnapshot{}, fmt.Errorf("%w: 资源路径不能为空", ErrInvalidInput)
+		return configSnap{}, fmt.Errorf("%w: 资源路径不能为空", ErrInvalidInput)
 	}
 
-	return configSnapshot{
+	// 启用「中文文字」时强制要求显式配置字符集，不静默退到内置默认。
+	hasChinese := false
+	for _, e := range cc.Elements {
+		if e == ElementCN {
+			hasChinese = true
+			break
+		}
+	}
+	if hasChinese && len(cc.ChineseChars) == 0 {
+		return configSnap{}, fmt.Errorf("%w: 启用「中文文字」时中文字符集必填", ErrInvalidInput)
+	}
+
+	return configSnap{
 		Elements:      append([]string(nil), cc.Elements...),
 		Length:        cc.Length,
 		NoiseLength:   cc.NoiseLength,
 		TTLSeconds:    cc.TTLSeconds,
+		ChineseChars:  append([]string(nil), cc.ChineseChars...),
 		BackgroundDir: cc.BackgroundDir,
 		IconDir:       cc.IconDir,
 		FontPath:      cc.FontPath,
@@ -192,7 +207,7 @@ func loadConfigSnapshot() (configSnapshot, error) {
 
 // CreateClick 生成一道点选验证码。
 func (m *Manager) CreateClick(ctx context.Context) (*ClickCaptcha, error) {
-	m.maybeCleanup(ctx)
+	m.cleanupLazy(ctx)
 
 	bgs, icons, font, err := loadAssets(m.cfg)
 	if err != nil {
@@ -233,8 +248,8 @@ func (m *Manager) CreateClick(ctx context.Context) (*ClickCaptcha, error) {
 }
 
 // VerifyClick 校验用户提交的答案序列；与库内 sha1 摘要比对。
-func (m *Manager) VerifyClick(ctx context.Context, req *VerifyRequest, deleteOnSuccess bool) error {
-	m.maybeCleanup(ctx)
+func (m *Manager) VerifyClick(ctx context.Context, req *VerifyReq, deleteOnSuccess bool) error {
+	m.cleanupLazy(ctx)
 
 	if req == nil || req.Key == "" {
 		return fmt.Errorf("%w: empty key", ErrInvalidInput)
@@ -265,8 +280,8 @@ func (m *Manager) VerifyClick(ctx context.Context, req *VerifyRequest, deleteOnS
 	return nil
 }
 
-// maybeCleanup 每次使用触发一次懒清理。失败吞掉不外抛（清理失败不应阻断主流程）。
-func (m *Manager) maybeCleanup(ctx context.Context) {
+// cleanupLazy 每次使用触发一次懒清理。失败吞掉不外抛（清理失败不应阻断主流程）。
+func (m *Manager) cleanupLazy(ctx context.Context) {
 	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, _ = m.repo.DeleteExpired(cleanupCtx, time.Now())
@@ -282,7 +297,7 @@ func hashAnswer(answer []string) string {
 // 资源加载（按需，无缓存）
 // ============================================================
 
-func loadAssets(cfg configSnapshot) ([]image.Image, map[string]image.Image, *truetype.Font, error) {
+func loadAssets(cfg configSnap) ([]image.Image, map[string]image.Image, *truetype.Font, error) {
 	bgNames, err := filesystem.ListByExt(cfg.BackgroundDir, ".png")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("background dir %q: %w", cfg.BackgroundDir, err)
@@ -336,16 +351,16 @@ func readPNG(path string) (image.Image, error) {
 // 图像合成 + 碰撞检测
 // ============================================================
 
-func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetype.Font, cfg configSnapshot, rng *rand.Rand) (*composeResult, error) {
+func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetype.Font, cfg configSnap, rng *rand.Rand) (*composeResult, error) {
 	bg := bgs[rng.Intn(len(bgs))]
 	canvas := image.NewRGBA(bg.Bounds())
 	draw.Draw(canvas, canvas.Bounds(), bg, image.Point{}, draw.Src)
 
-	correct, err := pickElements(cfg.Elements, icons, cfg.Length, rng)
+	correct, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.Length, rng)
 	if err != nil {
 		return nil, err
 	}
-	noise, err := pickElements(cfg.Elements, icons, cfg.NoiseLength, rng)
+	noise, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.NoiseLength, rng)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +370,7 @@ func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetyp
 
 	// 先放正确答案（顺序敏感）
 	for _, name := range correct {
-		rect, err := placeElement(canvas, name, icons, font, rng, used)
+		rect, err := placeElem(canvas, name, icons, font, rng, used)
 		if err != nil {
 			return nil, fmt.Errorf("place answer %s: %w", name, err)
 		}
@@ -365,7 +380,7 @@ func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetyp
 
 	// 再放干扰元素（放不下跳过，不致命）
 	for _, name := range noise {
-		rect, err := placeElement(canvas, name, icons, font, rng, used)
+		rect, err := placeElem(canvas, name, icons, font, rng, used)
 		if err != nil {
 			continue
 		}
@@ -380,9 +395,9 @@ func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetyp
 	}, nil
 }
 
-// placeElement 尝试放置一个元素；最多 maxPlaceTries 次，失败返 ErrInternal。
-func placeElement(canvas draw.Image, name string, icons map[string]image.Image, font *truetype.Font, rng *rand.Rand, used []placedRect) (placedRect, error) {
-	w, h := elementSize(name, icons)
+// placeElem 尝试放置一个元素；最多 maxPlaceTries 次，失败返 ErrInternal。
+func placeElem(canvas draw.Image, name string, icons map[string]image.Image, font *truetype.Font, rng *rand.Rand, used []placedRect) (placedRect, error) {
+	w, h := elemSize(name, icons)
 	for i := 0; i < maxPlaceTries; i++ {
 		cx := rng.Intn(bgWidth)
 		cy := rng.Intn(bgHeight)
@@ -393,7 +408,7 @@ func placeElement(canvas draw.Image, name string, icons map[string]image.Image, 
 		if checkCollision(rect, used) {
 			continue
 		}
-		if err := drawElement(canvas, cx, cy, random.Color(rng), name, font, icons); err != nil {
+		if err := drawElem(canvas, cx, cy, random.Color(rng), name, font, icons); err != nil {
 			return placedRect{}, err
 		}
 		return rect, nil
@@ -414,16 +429,16 @@ func checkCollision(candidate placedRect, existing []placedRect) bool {
 	return false
 }
 
-// elementSize 按元素类型返回绘制尺寸。
-func elementSize(name string, icons map[string]image.Image) (w, h int) {
+// elemSize 按元素类型返回绘制尺寸。
+func elemSize(name string, icons map[string]image.Image) (w, h int) {
 	if _, ok := icons[name]; ok {
 		return iconDrawSize, iconDrawSize
 	}
 	return textGlyphW, textGlyphH
 }
 
-// drawElement 把单个元素绘制到 canvas 的 (cx, cy) 中心。
-func drawElement(canvas draw.Image, cx, cy int, col color.RGBA, name string, font *truetype.Font, icons map[string]image.Image) error {
+// drawElem 把单个元素绘制到 canvas 的 (cx, cy) 中心。
+func drawElem(canvas draw.Image, cx, cy int, col color.RGBA, name string, font *truetype.Font, icons map[string]image.Image) error {
 	if img, ok := icons[name]; ok {
 		half := iconDrawSize / 2
 		rect := image.Rect(cx-half, cy-half, cx+iconDrawSize-half, cy+iconDrawSize-half)
@@ -449,12 +464,12 @@ func drawElement(canvas draw.Image, cx, cy int, col color.RGBA, name string, fon
 // 元素抽样
 // ============================================================
 
-// pickElements 从已启用的元素类型池里随机抽 count 个互不相同的元素。
-func pickElements(enabled []string, icons map[string]image.Image, count int, rng *rand.Rand) ([]string, error) {
+// pickElems 从已启用的元素类型池里随机抽 count 个互不相同的元素。
+func pickElems(enabled []string, icons map[string]image.Image, chineseChars []string, count int, rng *rand.Rand) ([]string, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("%w: count must be positive", ErrInvalidInput)
 	}
-	pool := expandEnabled(enabled, icons)
+	pool := expandEnabled(enabled, icons, chineseChars)
 	if len(pool) == 0 {
 		return nil, fmt.Errorf("%w: enabled elements expand to empty pool", ErrInvalidInput)
 	}
@@ -467,13 +482,13 @@ func pickElements(enabled []string, icons map[string]image.Image, count int, rng
 	return shuffled[:count], nil
 }
 
-func expandEnabled(enabled []string, icons map[string]image.Image) []string {
+func expandEnabled(enabled []string, icons map[string]image.Image, chineseChars []string) []string {
 	var pool []string
 	for _, e := range enabled {
 		switch e {
-		case ElementChinese:
-			pool = append(pool, commonChineseChars...)
-		case ElementEnglishUpper:
+		case ElementCN:
+			pool = append(pool, chineseChars...)
+		case ElementENUpper:
 			for r := 'A'; r <= 'Z'; r++ {
 				pool = append(pool, string(r))
 			}
@@ -490,14 +505,6 @@ func mapKeys(m map[string]image.Image) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-var commonChineseChars = []string{
-	"的", "一", "是", "不", "了", "人", "我", "在", "有", "他",
-	"这", "为", "之", "大", "来", "以", "个", "中", "上", "们",
-	"到", "说", "时", "要", "就", "出", "会", "也", "你", "对",
-	"生", "能", "而", "子", "那", "得", "于", "着", "下", "自",
-	"年", "过", "发", "后", "面",
 }
 
 // ============================================================

@@ -168,6 +168,10 @@ type CaptchaConfig struct {
 	NoiseLength int      `mapstructure:"混淆点长度"`
 	TTLSeconds  int      `mapstructure:"过期时间"`
 
+	// ChineseChars 启用「中文文字」元素时的可选字符集；
+	// 若 Elements 含 ElementChinese 则此项必填（不能为空）。
+	ChineseChars []string `mapstructure:"中文字符集"`
+
 	// BackgroundDir 背景图目录（含 1.png / 2.png 等）。
 	BackgroundDir string `mapstructure:"背景图目录"`
 

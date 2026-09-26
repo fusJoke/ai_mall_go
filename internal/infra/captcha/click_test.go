@@ -58,18 +58,19 @@ func (m *mockRepo) DeleteExpired(ctx context.Context, now time.Time) (int64, err
 	return 0, nil
 }
 
-func newTestManager(repo *mockRepo, cfg configSnapshot) *Manager {
+func newTestManager(repo *mockRepo, cfg configSnap) *Manager {
 	return &Manager{repo: repo, cfg: cfg}
 }
 
 // defaultCfg 返回测试用默认快照；资源路径为项目根下的绝对路径。
-func defaultCfg() configSnapshot {
+func defaultCfg() configSnap {
 	root := projectRoot()
-	return configSnapshot{
-		Elements:      []string{ElementEnglishUpper, ElementIcon},
+	return configSnap{
+		Elements:      []string{ElementENUpper, ElementIcon},
 		Length:        2,
 		NoiseLength:   2,
 		TTLSeconds:    600,
+		ChineseChars:  []string{"的", "一", "是"}, // 即便 Elements 未启用，也填非空，方便单独测试 chinese 路径
 		BackgroundDir: filepath.Join(root, "asset", "captcha", "click", "background"),
 		IconDir:       filepath.Join(root, "asset", "captcha", "click", "icon"),
 		FontPath:      filepath.Join(root, "asset", "font", "SourceHanSansCN-Normal.ttf"),
@@ -141,7 +142,7 @@ func TestVerifyClick_Success_ExactOrder(t *testing.T) {
 	}
 	m := newTestManager(repo, cfg)
 
-	if err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "test-key", Answer: answer}, true); err != nil {
+	if err := m.VerifyClick(context.Background(), &VerifyReq{Key: "test-key", Answer: answer}, true); err != nil {
 		t.Fatalf("VerifyClick: %v", err)
 	}
 	if n := repo.deleteCalls.Load(); n != 1 {
@@ -161,7 +162,7 @@ func TestVerifyClick_Fail_WrongOrder(t *testing.T) {
 	}
 	m := newTestManager(repo, cfg)
 
-	err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "k", Answer: []string{"B", "A"}}, false)
+	err := m.VerifyClick(context.Background(), &VerifyReq{Key: "k", Answer: []string{"B", "A"}}, false)
 	if !errors.Is(err, ErrMismatch) {
 		t.Fatalf("VerifyClick = %v, want ErrMismatch", err)
 	}
@@ -182,7 +183,7 @@ func TestVerifyClick_Fail_WrongCount(t *testing.T) {
 	}
 	m := newTestManager(repo, cfg)
 
-	err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "k", Answer: []string{"A"}}, false)
+	err := m.VerifyClick(context.Background(), &VerifyReq{Key: "k", Answer: []string{"A"}}, false)
 	if !errors.Is(err, ErrMismatch) {
 		t.Fatalf("VerifyClick = %v, want ErrMismatch", err)
 	}
@@ -197,7 +198,7 @@ func TestVerifyClick_Fail_Expired(t *testing.T) {
 	}
 	m := newTestManager(repo, defaultCfg())
 
-	err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "k", Answer: []string{"A", "B"}}, false)
+	err := m.VerifyClick(context.Background(), &VerifyReq{Key: "k", Answer: []string{"A", "B"}}, false)
 	if !errors.Is(err, ErrExpired) {
 		t.Fatalf("VerifyClick = %v, want ErrExpired", err)
 	}
@@ -211,7 +212,7 @@ func TestVerifyClick_Fail_NotFound(t *testing.T) {
 	}
 	m := newTestManager(repo, defaultCfg())
 
-	err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "missing", Answer: []string{"A", "B"}}, false)
+	err := m.VerifyClick(context.Background(), &VerifyReq{Key: "missing", Answer: []string{"A", "B"}}, false)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("VerifyClick = %v, want ErrNotFound", err)
 	}
@@ -221,11 +222,11 @@ func TestVerifyClick_InvalidInput(t *testing.T) {
 	m := newTestManager(&mockRepo{}, defaultCfg())
 	cases := []struct {
 		name string
-		req  *VerifyRequest
+		req  *VerifyReq
 	}{
-		{"empty key", &VerifyRequest{Key: "", Answer: []string{"A", "B"}}},
-		{"empty answer", &VerifyRequest{Key: "k"}},
-		{"wrong count", &VerifyRequest{Key: "k", Answer: []string{"A"}}},
+		{"empty key", &VerifyReq{Key: "", Answer: []string{"A", "B"}}},
+		{"empty answer", &VerifyReq{Key: "k"}},
+		{"wrong count", &VerifyReq{Key: "k", Answer: []string{"A"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,7 +288,7 @@ func TestMaybeCleanup_RunsOnEachUse(t *testing.T) {
 	}
 	m := newTestManager(repo, cfg)
 
-	if err := m.VerifyClick(context.Background(), &VerifyRequest{Key: "k", Answer: []string{"A", "B"}}, false); err != nil {
+	if err := m.VerifyClick(context.Background(), &VerifyReq{Key: "k", Answer: []string{"A", "B"}}, false); err != nil {
 		t.Fatalf("VerifyClick: %v", err)
 	}
 	if n := repo.expiredCalls.Load(); n < 1 {
@@ -308,7 +309,7 @@ func TestLoadConfigSnapshot_RequiresAllFields(t *testing.T) {
 		Database: config.DatabaseConfig{Type: "mysql"},
 		Token:    config.TokenConfig{Driver: "database"},
 		Captcha: config.CaptchaConfig{
-			Elements:    []string{ElementEnglishUpper},
+			Elements:    []string{ElementENUpper},
 			Length:      0, // invalid
 			NoiseLength: 0,
 			TTLSeconds:  600,
@@ -317,9 +318,34 @@ func TestLoadConfigSnapshot_RequiresAllFields(t *testing.T) {
 	setConfigForTest(cfg)
 	t.Cleanup(func() { setConfigForTest(nil) })
 
-	_, err := loadConfigSnapshot()
+	_, err := loadConfigSnap()
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("loadConfigSnapshot = %v, want ErrInvalidInput", err)
+		t.Fatalf("loadConfigSnap = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestLoadConfigSnapshot_ChineseRequiresCharSet(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	cfg := &config.Config{
+		Server:   config.ServerConfig{Name: "test", Port: 8080},
+		Database: config.DatabaseConfig{Type: "mysql"},
+		Token:    config.TokenConfig{Driver: "database"},
+		Captcha: config.CaptchaConfig{
+			Elements:     []string{ElementCN}, // 启用中文
+			Length:       2,
+			NoiseLength:  2,
+			TTLSeconds:   600,
+			ChineseChars: nil, // 但未配字符集 → 应报错
+		},
+	}
+	setConfigForTest(cfg)
+	t.Cleanup(func() { setConfigForTest(nil) })
+
+	_, err := loadConfigSnap()
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("loadConfigSnap = %v, want ErrInvalidInput", err)
 	}
 }
 
