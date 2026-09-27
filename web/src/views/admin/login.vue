@@ -1,9 +1,18 @@
 <template>
     <div class="page">
+        <!--
+            TODO(admin-header): 这个临时注销 bar 在下一个 admin header UI commit 里会被替换。
+            当前唯一目的是给 Logout 接口一个联调入口；正式 admin header 会把用户态
+            信息渲染到顶栏，这里整体删除。
+        -->
+        <div v-if="adminInfo.token" class="logged-in-bar">
+            <span class="logged-in-text">已登录为 <b>{{ adminInfo.username }}</b></span>
+            <button type="button" class="link-btn" @click="doLogout">注销</button>
+        </div>
         <div class="left" :style="{ background: `linear-gradient(135deg, ${primaryColor}e6, ${primaryColor}, ${primaryColor}cc)` }">
             <div class="brand">
                 <div class="brand-icon">
-                    <Sparkles :size="16" />
+                    <Icon name="lucide:Sparkles" :size="16" />
                 </div>
                 <span>{{ brandName }}</span>
             </div>
@@ -27,7 +36,7 @@
             <div class="form-wrapper">
                 <div class="mobile-brand">
                     <div class="brand-icon">
-                        <Sparkles :size="16" />
+                        <Icon name="lucide:Sparkles" :size="16" />
                     </div>
                     <span>{{ brandName }}</span>
                 </div>
@@ -61,8 +70,8 @@
                                 placeholder="••••••••"
                             />
                             <button type="button" class="eye-btn" @click="showPassword = !showPassword">
-                                <EyeOff v-if="showPassword" :size="20" />
-                                <Eye v-else :size="20" />
+                                <Icon v-if="showPassword" name="lucide:EyeOff" :size="20" />
+                                <Icon v-else name="lucide:Eye" :size="20" />
                             </button>
                         </div>
                     </div>
@@ -84,7 +93,7 @@
                     </button>
                 </form>
                 <button v-if="showGoogleLogin" type="button" class="btn-google">
-                    <Mail :size="20" />
+                    <Icon name="lucide:Mail" :size="20" />
                     使用 Google 账号登录
                 </button>
                 <p class="signup-link">
@@ -98,9 +107,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Eye, EyeOff, Mail, Sparkles } from '@lucide/vue'
 import AnimatedCharacters from './components/AnimatedCharacters.vue'
-import { login } from '/@/api/admin'
+import { login, logout } from '/@/api/admin'
 import clickCaptcha from '/@/components/clickCaptcha/index'
 import { useAdminInfo } from '/@/stores/adminInfo'
 import { shortUuid } from '/@/utils/random'
@@ -197,6 +205,21 @@ function onSubmit() {
     clickCaptcha(shortUuid(), (captchaKey, points) => {
         submitLogin(captchaKey, points)
     })
+}
+
+/**
+ * 登出：先调后端软删 token，再清空前端 store。
+ *
+ * TODO(admin-header): 这个临时 bar 在下一个 admin header UI commit 里会被替换。
+ * 接口语义：后端 Logout 是幂等的（无 token / token 不存在也返回 200），失败静默处理。
+ */
+async function doLogout() {
+    try {
+        await logout()
+    } catch {
+        // 网络失败 / 500 都不阻塞本地清理 —— 用户意图明确是「清掉本地登录态」。
+    }
+    adminInfo.reset()
 }
 </script>
 
@@ -448,6 +471,35 @@ function onSubmit() {
         &:hover {
             text-decoration: underline;
         }
+    }
+}
+
+/* 临时注销 bar —— TODO(admin-header) 替换后会删除 */
+.logged-in-bar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #f4f4f5;
+    border-bottom: 1px solid #e4e4e7;
+    font-size: 14px;
+    color: #18181b;
+}
+.logged-in-text b {
+    font-weight: 600;
+}
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #4f46e5;
+    font-size: 14px;
+    cursor: pointer;
+
+    &:hover {
+        text-decoration: underline;
     }
 }
 @media (max-width: 1023px) {

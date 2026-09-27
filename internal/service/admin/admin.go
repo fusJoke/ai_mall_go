@@ -27,6 +27,10 @@ import (
 // 但能让 service 层测试不依赖真实 token.Manager（也就无需真实 DB）。
 type tokenIssuer interface {
 	Create(ctx context.Context, t *model.Token) error
+
+	// Delete 软删除 rawToken 对应的记录；幂等 —— 不存在 / 已删除 / 已过期一律返回 nil。
+	// *token.Manager.Delete 已在 internal/infra/token/token.go:131-137 实现。
+	Delete(ctx context.Context, rawToken string) error
 }
 
 // captchaVerifier 是 service 层对点选验证码「消费型 verify」的最小抽象。
@@ -82,6 +86,10 @@ type Service interface {
 	//     并签发 token（remember=true → TokenTTLRemember，否则 TokenTTLShort）。
 	//  5. token 落库失败：返回 error（admin 状态更新已落库，前端应提示重试）。
 	Login(c *gin.Context, username, password, captchaKey string, points []captchaInfra.Point, remember bool) (*model.Admin, string, error)
+
+	// Logout 软删除当前调用方持有的 token；幂等 —— token 缺失 / 已过期 / 不存在一律返回 nil。
+	// 由 tokenIssuer.Delete 保证幂等性，service 层不做额外包装。
+	Logout(ctx context.Context, rawToken string) error
 }
 
 // baseService 是 Service 的默认实现。
@@ -172,6 +180,11 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 	}
 
 	return adm, rawToken, nil
+}
+
+// Logout 实现见 Service 注释。直接转发到 tokenIssuer.Delete —— 幂等性由 token infra 保证。
+func (s *baseService) Logout(ctx context.Context, rawToken string) error {
+	return s.tm.Delete(ctx, rawToken)
 }
 
 // 编译期断言：baseService 必须实现 Service。

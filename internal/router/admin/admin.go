@@ -58,4 +58,11 @@ func init() {
 		ensureDeps()
 		adminHandlerInst.Login(c)
 	})
+
+	// POST /admin/logout —— 管理员登出（公开、幂等；handler 内部已处理无 token / token 无效情况）。
+	// 这里同样包 ensureDeps() 保证 service / handler 已就绪。
+	registry.Register("/admin", http.MethodPost, "/logout", func(c *gin.Context) {
+		ensureDeps()
+		adminHandlerInst.Logout(c)
+	})
 }

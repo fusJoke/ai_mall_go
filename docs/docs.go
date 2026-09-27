@@ -36,7 +36,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_admin.LoginRequest"
+                            "$ref": "#/definitions/admin.LoginRequest"
                         }
                     }
                 ],
@@ -44,7 +44,7 @@ const docTemplate = `{
                     "200": {
                         "description": "登录成功",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_admin.LoginResponse"
+                            "$ref": "#/definitions/admin.LoginResponse"
                         }
                     },
                     "400": {
@@ -86,6 +86,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "软删除当前调用方持有的 admin token；幂等 —— 缺失 / 格式错误 / 已过期 / 不存在都返回 200。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "管理员登出",
+                "responses": {
+                    "200": {
+                        "description": "logout.ok",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "logout.internal",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/common/captcha/create": {
             "get": {
                 "description": "服务端生成一道点选验证码；返回的 key 须先经 /common/captcha/verify 预校验坐标精度，才能用于业务（如登录）。",
@@ -100,7 +140,7 @@ const docTemplate = `{
                     "200": {
                         "description": "成功：返回 key / elements / image 等",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_captcha.CreateClickResp"
+                            "$ref": "#/definitions/captcha.CreateClickResp"
                         }
                     },
                     "500": {
@@ -135,7 +175,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_captcha.VerifyClickReq"
+                            "$ref": "#/definitions/captcha.VerifyClickReq"
                         }
                     }
                 ],
@@ -197,7 +237,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "internal_handler_admin.CaptchaPoint": {
+        "admin.CaptchaPoint": {
             "type": "object",
             "properties": {
                 "x": {
@@ -208,7 +248,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_admin.LoginRequest": {
+        "admin.LoginRequest": {
             "type": "object",
             "required": [
                 "captcha_key",
@@ -228,7 +268,7 @@ const docTemplate = `{
                     "description": "Points 是用户在图片坐标系下的点击坐标（按 elements 顺序）。\n与 captchaKey 一起透传给 service，做二次校验。",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_handler_admin.CaptchaPoint"
+                        "$ref": "#/definitions/admin.CaptchaPoint"
                     }
                 },
                 "remember": {
@@ -240,18 +280,18 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_admin.LoginResponse": {
+        "admin.LoginResponse": {
             "type": "object",
             "properties": {
                 "admin": {
-                    "$ref": "#/definitions/internal_handler_admin.adminInfo"
+                    "$ref": "#/definitions/admin.adminInfo"
                 },
                 "token": {
                     "type": "string"
                 }
             }
         },
-        "internal_handler_admin.adminInfo": {
+        "admin.adminInfo": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -286,7 +326,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_captcha.CreateClickResp": {
+        "captcha.CreateClickResp": {
             "type": "object",
             "properties": {
                 "elements": {
@@ -309,18 +349,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_captcha.Point": {
-            "type": "object",
-            "properties": {
-                "x": {
-                    "type": "integer"
-                },
-                "y": {
-                    "type": "integer"
-                }
-            }
-        },
-        "internal_handler_captcha.VerifyClickReq": {
+        "captcha.VerifyClickReq": {
             "type": "object",
             "required": [
                 "h",
@@ -342,6 +371,17 @@ const docTemplate = `{
                     }
                 },
                 "w": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler_captcha.Point": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
                     "type": "integer"
                 }
             }

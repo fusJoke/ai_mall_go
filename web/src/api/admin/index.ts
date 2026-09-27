@@ -1,6 +1,6 @@
 import type { ClickRequest } from '/@/components/clickCaptcha/index'
 import request from '/@/utils/request'
-import type { LoginRequest, LoginResponse } from '/@/stores/interface'
+import type { LoginRequest, LoginResponse, LogoutResponse } from '/@/stores/interface'
 
 /**
  * 获取点选验证码
@@ -50,6 +50,21 @@ export function login(data: LoginRequest) {
         url: '/admin/login',
         method: 'POST',
         data,
+        __opts: { showErrorMessage: false },
+    })
+}
+
+/**
+ * 管理员登出
+ *
+ * 后端实现见 internal/handler/admin/admin.go Logout。语义幂等 —— 不论是否登录、
+ * token 是否有效，调用都返回 200。失败也用 `showErrorMessage: false` 静默处理：
+ * 调用方拿到 res 后仍执行 adminInfo.reset() 做本地清理，避免 token 残留。
+ */
+export function logout() {
+    return request.request<LogoutResponse>({
+        url: '/admin/logout',
+        method: 'POST',
         __opts: { showErrorMessage: false },
     })
 }

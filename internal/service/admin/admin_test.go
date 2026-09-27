@@ -62,12 +62,16 @@ var _ adminRepo.Repository = (*mockRepo)(nil)
 
 // mockIssuer 是 service 包内 tokenIssuer 接口的最小实现。
 //
-// createFunc 字段化：测试可控制 Create 的行为（成功 / 失败 / 记录入参）。
+// createFunc / deleteFunc 字段化：测试可控制 Create / Delete 的行为（成功 / 失败 / 记录入参）。
 type mockIssuer struct {
 	createFunc func(ctx context.Context, t *model.Token) error
+	deleteFunc func(ctx context.Context, rawToken string) error
 
 	createCalls int
 	lastToken   *model.Token
+
+	deleteCalls int
+	lastDelete  string
 }
 
 func (m *mockIssuer) Create(ctx context.Context, t *model.Token) error {
@@ -75,6 +79,15 @@ func (m *mockIssuer) Create(ctx context.Context, t *model.Token) error {
 	m.lastToken = t
 	if m.createFunc != nil {
 		return m.createFunc(ctx, t)
+	}
+	return nil
+}
+
+func (m *mockIssuer) Delete(ctx context.Context, rawToken string) error {
+	m.deleteCalls++
+	m.lastDelete = rawToken
+	if m.deleteFunc != nil {
+		return m.deleteFunc(ctx, rawToken)
 	}
 	return nil
 }
@@ -210,6 +223,9 @@ func TestLogin_WrongPassword(t *testing.T) {
 		t.Errorf("repo.Update should set LoginFailure=1, got %+v", repo.lastUpdate)
 	}
 }
+
+// TestLogin_WrongPassword_LocksAtThreshold 与 TestLogin_WrongPassword_BelowThreshold_NoClear 等
+// 锁定相关用例与「MaxLoginFailure / tm.Clear」一起引入，放在 lockout commit 单独提交。
 
 func TestLogin_AccountDisabled(t *testing.T) {
 	adm := newTestAdmin(t)
@@ -429,5 +445,76 @@ func TestLogin_EmptyCaptchaKey_StillGoesThroughCaptcha(t *testing.T) {
 	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, "", testPoints, false)
 	if err != nil {
 		t.Fatalf("Login = %v, want nil", err)
+	}
+}
+
+// --- Logout tests ---
+
+// TestLogout_Success 验证：service.Logout 把 rawToken 透传给 tokenIssuer.Delete；
+// mock 记录到调用次数与入参，service 自身不产生错误。
+func TestLogout_Success(t *testing.T) {
+	repo := &mockRepo{}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	if err := svc.Logout(context.Background(), "abc.def"); err != nil {
+		t.Fatalf("Logout = %v, want nil", err)
+	}
+	if iss.deleteCalls != 1 {
+		t.Errorf("issuer.Delete called %d times, want 1", iss.deleteCalls)
+	}
+	if iss.lastDelete != "abc.def" {
+		t.Errorf("issuer.Delete got rawToken = %q, want %q", iss.lastDelete, "abc.def")
+	}
+}
+
+// TestLogout_DeletePropagatesError 验证：tokenIssuer.Delete 失败时 service.Logout
+// 原样透传（errors.Is 命中），不吞错也不包额外层。
+func TestLogout_DeletePropagatesError(t *testing.T) {
+	wantErr := errors.New("token store down")
+	repo := &mockRepo{}
+	iss := &mockIssuer{
+		deleteFunc: func(ctx context.Context, rawToken string) error {
+			return wantErr
+		},
+	}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	err := svc.Logout(context.Background(), "any-token")
+	if !errors.Is(err, wantErr) {
+		t.Errorf("Logout = %v, want %v", err, wantErr)
+	}
+	if iss.deleteCalls != 1 {
+		t.Errorf("issuer.Delete called %d times, want 1", iss.deleteCalls)
+	}
+}
+
+// TestLogout_NoRepoAccess 验证：Logout 流程不触达 admin repo ——
+// 只走 tokenIssuer，repo.Update / GetByUsername 等计数应保持 0。
+func TestLogout_NoRepoAccess(t *testing.T) {
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			t.Errorf("repo.GetByUsername should NOT be called during logout")
+			return nil, gorm.ErrRecordNotFound
+		},
+		updateFunc: func(c *gin.Context, entity *model.Admin) error {
+			t.Errorf("repo.Update should NOT be called during logout")
+			return nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	if err := svc.Logout(context.Background(), "any-token"); err != nil {
+		t.Fatalf("Logout = %v, want nil", err)
+	}
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times during logout, want 0", repo.updateCalls)
+	}
+	if iss.deleteCalls != 1 {
+		t.Errorf("issuer.Delete called %d times, want 1", iss.deleteCalls)
 	}
 }

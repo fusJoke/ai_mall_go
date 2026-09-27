@@ -55,6 +55,20 @@ export interface LoginResponse {
 }
 
 /**
+ * 管理员登出响应 —— 与后端 internal/handler/admin/admin.go Logout 信封对齐。
+ *
+ * 后端 Logout 始终返回 `{code, message}` 信封：
+ * - message="ok" 表示 token 被软删除（有效 / 已过期统一处理）
+ * - message="no active session" 表示 header 缺失 / 格式错误 / token 不存在
+ *
+ * 调用方一般不消费 message 文案，登出失败由 axios 拦截器静默处理。
+ */
+export interface LogoutResponse {
+    code: string
+    message: string
+}
+
+/**
  * CRUD 列表模块配置
  */
 export interface Crud {

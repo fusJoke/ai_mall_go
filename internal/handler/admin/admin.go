@@ -8,6 +8,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -84,6 +85,13 @@ type adminInfo struct {
 	Status      int8    `json:"status"`
 }
 
+// bearerLogoutPrefix 是 Logout 解析时接受的 Bearer scheme 前缀（RFC 6750 大小写不敏感）。
+//
+// 放在文件顶部的 Login 注释块上方 —— swag 解析时以「最近的 // 注释块」为锚定，
+// 任何 const / var / type 声明插在 @Router 注解和 handler 函数之间都会让 swag
+// 丢失该注解，导致接口不出现在 swagger 文档里。
+const bearerLogoutPrefix = "Bearer "
+
 // Login 处理 POST /admin/login。
 //
 // body 缺字段 → 400；用户名 / 密码错 → 401（不区分）；账号禁用 → 403；成功 → 200。
@@ -146,6 +154,58 @@ func (h *Handler) Login(c *gin.Context) {
 		Admin: toAdminInfo(adm),
 		Token: rawToken,
 	})
+}
+
+// Logout 处理 POST /admin/logout。
+//
+// Bearer token 解析内联在 handler 顶部 —— 唯一调用点，不抽 helper。
+// 幂等：header 缺失 / 格式错误 / token 不存在 / 已过期 / 已登出 → 一律 200；
+// token 有效 → 软删除 → 200；只有存储驱动出错才返回 500。
+//
+// @Summary      管理员登出
+// @Description  软删除当前调用方持有的 admin token；幂等 —— 缺失 / 格式错误 / 已过期 / 不存在都返回 200。
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]string  "logout.ok"
+// @Failure      500  {object}  map[string]string  "logout.internal"
+// @Router       /admin/logout [post]
+func (h *Handler) Logout(c *gin.Context) {
+	authz := c.GetHeader("Authorization")
+	rawToken := extractBearerToken(authz)
+	if rawToken == "" {
+		// header 缺失 / 非 Bearer / 截取后为空：视作幂等成功，不落库。
+		c.JSON(http.StatusOK, gin.H{
+			"code":    "logout.ok",
+			"message": "no active session",
+		})
+		return
+	}
+	if err := h.svc.Logout(c.Request.Context(), rawToken); err != nil {
+		// 500 不回显 err.Error() —— 驱动层细节可能暴露存储路径 / SQL 状态。
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "logout.internal",
+			"message": "logout failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    "logout.ok",
+		"message": "ok",
+	})
+}
+
+// extractBearerToken 从 Authorization 头里抠出明文 token；scheme 大小写不敏感。
+// 不匹配 / 截取为空 → 返回空串（调用方按幂等成功处理）。
+func extractBearerToken(authz string) string {
+	if len(authz) < len(bearerLogoutPrefix) {
+		return ""
+	}
+	if !strings.EqualFold(authz[:len(bearerLogoutPrefix)], bearerLogoutPrefix) {
+		return ""
+	}
+	return strings.TrimSpace(authz[len(bearerLogoutPrefix):])
 }
 
 // toAdminInfo 把 *model.Admin 投影到不含敏感字段的 adminInfo。

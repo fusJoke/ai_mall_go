@@ -43,6 +43,27 @@ export const useAdminInfo = defineStore('adminInfo', {
         removeToken() {
             this.token = ''
         },
+        /**
+         * 登出时清空整个 store —— 不仅清 token，也清其他持久化字段。
+         *
+         * 为什么不调 Pinia 内置 `$reset()`：它依赖 state factory 的初始化结果，
+         * 未来加新字段时容易遗漏。显式列字段更可控，且新字段加入时编辑器会立刻报红。
+         *
+         * 配合 pinia-plugin-persistedstate 使用：清完即触发 localStorage 写入，
+         * 旧值不会再残留。
+         */
+        reset() {
+            this.removeToken()
+            this.$patch({
+                id: 0,
+                username: '',
+                nickname: '',
+                avatar: '',
+                last_login_at: '',
+                last_login_ip: '',
+                super: false,
+            })
+        },
     },
     persist: {
         key: ADMIN_INFO,
