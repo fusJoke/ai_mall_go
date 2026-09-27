@@ -37,14 +37,14 @@
                 </div>
                 <form class="form" @submit.prevent="onSubmit">
                     <div class="field">
-                        <label for="login-email">邮箱</label>
+                        <label for="login-username">用户名</label>
                         <input
-                            id="login-email"
-                            v-model="email"
-                            type="email"
-                            autocomplete="off"
+                            id="login-username"
+                            v-model="username"
+                            type="text"
+                            autocomplete="username"
                             required
-                            :placeholder="emailPlaceholder"
+                            :placeholder="usernamePlaceholder"
                             @focus="isTyping = true"
                             @blur="isTyping = false"
                         />
@@ -56,6 +56,7 @@
                                 id="login-password"
                                 v-model="password"
                                 :type="showPassword ? 'text' : 'password'"
+                                autocomplete="current-password"
                                 required
                                 placeholder="••••••••"
                             />
@@ -100,20 +101,22 @@ import { useRouter } from 'vue-router'
 import { Eye, EyeOff, Mail, Sparkles } from '@lucide/vue'
 import AnimatedCharacters from './components/AnimatedCharacters.vue'
 import { login } from '/@/api/admin'
+import clickCaptcha from '/@/components/clickCaptcha/index'
 import { useAdminInfo } from '/@/stores/adminInfo'
+import { shortUuid } from '/@/utils/random'
 
 withDefaults(defineProps<{
     brandName?: string
     title?: string
     subtitle?: string
-    emailPlaceholder?: string
+    usernamePlaceholder?: string
     primaryColor?: string
     showGoogleLogin?: boolean
 }>(), {
     brandName: 'AI Go Mall',
     title: '欢迎回来',
     subtitle: '请输入您的账号信息',
-    emailPlaceholder: '请输入邮箱地址',
+    usernamePlaceholder: '请输入用户名',
     primaryColor: '#4f46e5',
     showGoogleLogin: false,
 })
@@ -122,7 +125,7 @@ const router = useRouter()
 const adminInfo = useAdminInfo()
 
 const showPassword = ref(false)
-const email = ref('')
+const username = ref('')
 const password = ref('')
 const remember = ref(false)
 const errorMsg = ref('')
@@ -139,14 +142,30 @@ defineExpose({
     },
 })
 
-async function onSubmit() {
+/**
+ * 把 axios 错误对象翻译成对用户友好的中文文案。
+ *
+ * axios 默认文案像 "Request failed with status code 401" 用户看不懂；
+ * 后端返回的 {code, message} 字段会通过拦截器塞到 err.message 上（参见
+ * /web/src/utils/request.ts 的 axios 拦截器），优先使用 message，否则 fallback。
+ */
+function describeLoginError(err: unknown): string {
+    const anyErr = err as { response?: { data?: { message?: string } }; message?: string } | undefined
+    const fromBackend = anyErr?.response?.data?.message
+    if (fromBackend) return fromBackend
+    if (anyErr?.message) return anyErr.message
+    return '登录失败，请重试'
+}
+
+async function submitLogin(captchaKey: string, points: { x: number; y: number }[]) {
     errorMsg.value = ''
     loading.value = true
     try {
-        // 页面变量暂叫 email；后端 LoginRequest 字段叫 username，此处映射。
         const { data } = await login({
-            username: email.value,
+            username: username.value,
             password: password.value,
+            captcha_key: captchaKey,
+            points,
             remember: remember.value,
         })
 
@@ -166,10 +185,18 @@ async function onSubmit() {
         // 3) 跳转 /admin —— /admin redirect 到 /admin/loading，由 loading 视图决定下一步
         await router.push('/admin')
     } catch (err) {
-        errorMsg.value = (err as Error)?.message || '登录失败，请重试'
+        errorMsg.value = describeLoginError(err)
     } finally {
         loading.value = false
     }
+}
+
+function onSubmit() {
+    errorMsg.value = ''
+    // 先弹点选验证码：用户点完 → 预检通过 → 回调拿到 captchaKey + points → 真正调 login。
+    clickCaptcha(shortUuid(), (captchaKey, points) => {
+        submitLogin(captchaKey, points)
+    })
 }
 </script>
 

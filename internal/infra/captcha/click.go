@@ -20,6 +20,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -31,6 +32,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/freetype"
@@ -52,15 +54,37 @@ const (
 	ElementIcon    = "ICON"
 )
 
-// 渲染常量。
+// 渲染与精度常量。
 const (
-	bgWidth        = 320
-	bgHeight       = 180
+	// ImageWidth / ImageHeight 渲染 canvas 的固定尺寸；与 asset/captcha/click/background/*.png 一致。
+	ImageWidth  = 350
+	ImageHeight = 200
+
+	// ToleranceRadiusText 文字类元素（CN/EN）的容差半径（像素）。
+	ToleranceRadiusText = 14
+	// ToleranceRadiusIcon ICON 类元素的容差半径（像素）。
+	ToleranceRadiusIcon = 24
+
+	// MaxFailPerKey 单个 key 累计允许的 verify 失败次数；超阈值立即硬删 key，前端必须重新 create。
+	MaxFailPerKey = 3
+
 	textGlyphW     = 24
 	textGlyphH     = 28
 	iconDrawSize   = 44
 	textFontSizePt = 24.0
 	maxPlaceTries  = 200
+)
+
+// bgWidth / bgHeight 是放置期的元素中心坐标随机范围，恒等于 ImageWidth / ImageHeight。
+const (
+	bgWidth  = ImageWidth
+	bgHeight = ImageHeight
+)
+
+// ElemKind 元素类型，决定 verify 时的容差半径与 placeholderKind 字段。
+const (
+	KindText = "text"
+	KindIcon = "icon"
 )
 
 // ============================================================
@@ -70,6 +94,23 @@ const (
 // placedRect 是元素在 canvas 上的矩形包围盒；仅在 compose 期间用于碰撞检测，不入库。
 type placedRect struct {
 	x, y, w, h int // 左上角 + 尺寸
+}
+
+// PlacedElem 是 composeImage 输出/持久化的「正确答案元素」结构。
+// 与前端 VerifyReq.Points[i] 按下标顺序配对比对，按 Kind 选容差半径。
+type PlacedElem struct {
+	Name string `json:"name"`
+	CX   int    `json:"cx"`
+	CY   int    `json:"cy"`
+	Kind string `json:"kind"`
+}
+
+// StoredInfo 是持久化到 captchas.Info 的 JSON 形态。
+// Sha 是按 elements 顺序拼 join 后 sha1 hex（用于整体兜底/兼容性）；
+// Points 是 PlacedElem 数组（用于精度比对）。
+type StoredInfo struct {
+	Sha    string       `json:"sha"`
+	Points []PlacedElem `json:"points"`
 }
 
 // configSnap 是 Manager 持有的配置副本（与全局 config 解耦）。
@@ -86,10 +127,11 @@ type configSnap struct {
 
 // composeResult 是 composeImage 的输出。
 type composeResult struct {
-	Image       *image.RGBA
-	AnswerOrder []string
-	Width       int
-	Height      int
+	Image    *image.RGBA
+	Placed   []PlacedElem
+	Elements []string // 同 Placed[i].Name 顺序的元素名数组；保留用于 ClickCaptcha.Elements 响应字段
+	Width    int
+	Height   int
 }
 
 // ClickCaptcha 是 CreateClick 返回给前端的点选验证码。
@@ -101,16 +143,36 @@ type ClickCaptcha struct {
 	Height   int
 }
 
-// VerifyReq 是 VerifyClick 的入参；Answer 是用户按点击顺序提交的元素名。
+// VerifyReq 是 VerifyClick 的入参；Points 是用户按点击顺序提交的原始像素坐标（与 ImageWidth/ImageHeight 同一坐标系）。
 type VerifyReq struct {
-	Key    string   `json:"key"`
-	Answer []string `json:"answer"`
+	Key    string `json:"key"`
+	Points []Point `json:"points"`
+	W      int    `json:"w"`
+	H      int    `json:"h"`
+}
+
+// Point 是用户在图片坐标系下的点击坐标。
+type Point struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// failEntry 是单 key 的失败计数条目。
+//
+//   - cnt 是 atomic.Int64 指针：保证并发 recordFail 下的 RMW 不丢失更新
+//     （`sync.Map` 只保护 map 自身读写，不保护指针指向的值）；
+//   - expiresAt 是该 key 对应的 captcha 过期时间，让 cleanupLazy 能按过期
+//     时间剔除计数项，避免泄漏（详见 cleanupLazy 的实现与设计 D4）。
+type failEntry struct {
+	cnt       *atomic.Int64
+	expiresAt time.Time
 }
 
 // Manager 是 captcha 业务的对外门面。
 type Manager struct {
-	repo captchaRepo.Repository
-	cfg  configSnap
+	repo    captchaRepo.Repository
+	cfg     configSnap
+	failCnt sync.Map // map[string]*failEntry —— 单 key 失败计数；达到 MaxFailPerKey 即硬删
 }
 
 var (
@@ -226,12 +288,23 @@ func (m *Manager) CreateClick(ctx context.Context) (*ClickCaptcha, error) {
 	}
 	imageBase64 := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
 
-	info := hashAnswer(result.AnswerOrder)
+	elements := make([]string, len(result.Placed))
+	for i, p := range result.Placed {
+		elements[i] = p.Name
+	}
+	info := StoredInfo{
+		Sha:    hashAnswer(elements),
+		Points: result.Placed,
+	}
+	infoJSON, err := encodeStoredInfo(info)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode info: %v", ErrInternal, err)
+	}
 
 	key := uuid.NewString()
 	cpt := &model.Captcha{
 		Key:       key,
-		Info:      &info,
+		Info:      &infoJSON,
 		ExpiresAt: time.Now().Add(time.Duration(m.cfg.TTLSeconds) * time.Second),
 	}
 	if err := m.repo.Create(ctx, cpt); err != nil {
@@ -240,22 +313,23 @@ func (m *Manager) CreateClick(ctx context.Context) (*ClickCaptcha, error) {
 
 	return &ClickCaptcha{
 		Key:      key,
-		Elements: result.AnswerOrder,
+		Elements: elements,
 		Image:    imageBase64,
 		Width:    result.Width,
 		Height:   result.Height,
 	}, nil
 }
 
-// VerifyClick 校验用户提交的答案序列；与库内 sha1 摘要比对。
+// VerifyClick 按图片原始坐标精度比对：依次校验 W/H、Points 长度，再按 placed[i].Kind 选容差半径比欧氏距离。
+// 成功按 deleteOnSuccess 决定是否立即硬删 key；任何失败会增加 failCnt，失败次数达 MaxFailPerKey 时硬删 key。
 func (m *Manager) VerifyClick(ctx context.Context, req *VerifyReq, deleteOnSuccess bool) error {
 	m.cleanupLazy(ctx)
 
 	if req == nil || req.Key == "" {
 		return fmt.Errorf("%w: empty key", ErrInvalidInput)
 	}
-	if len(req.Answer) != m.cfg.Length {
-		return fmt.Errorf("%w: answer count %d, want %d", ErrMismatch, len(req.Answer), m.cfg.Length)
+	if req.W != ImageWidth || req.H != ImageHeight {
+		return fmt.Errorf("%w: size mismatch (want %dx%d, got %dx%d)", ErrInvalidInput, ImageWidth, ImageHeight, req.W, req.H)
 	}
 
 	cpt, err := m.repo.GetByKey(ctx, req.Key)
@@ -268,23 +342,120 @@ func (m *Manager) VerifyClick(ctx context.Context, req *VerifyReq, deleteOnSucce
 	if time.Now().After(cpt.ExpiresAt) {
 		return ErrExpired
 	}
-	if cpt.Info == nil || *cpt.Info != hashAnswer(req.Answer) {
-		return fmt.Errorf("%w: answer mismatch", ErrMismatch)
+	if cpt.Info == nil {
+		return fmt.Errorf("%w: empty info", ErrInternal)
+	}
+	info, err := decodeStoredInfo(*cpt.Info)
+	if err != nil {
+		return fmt.Errorf("%w: decode info: %v", ErrInternal, err)
+	}
+	if len(req.Points) != len(info.Points) {
+		m.recordFail(req.Key, cpt.ExpiresAt, ctx)
+		return fmt.Errorf("%w: points count %d, want %d", ErrMismatch, len(req.Points), len(info.Points))
+	}
+	for i, p := range req.Points {
+		pl := info.Points[i]
+		if !withinTolerance(p, pl) {
+			m.recordFail(req.Key, cpt.ExpiresAt, ctx)
+			return fmt.Errorf("%w: point %d out of tolerance", ErrMismatch, i)
+		}
 	}
 
 	if deleteOnSuccess {
 		if err := m.repo.DeleteByKey(ctx, req.Key); err != nil {
 			return fmt.Errorf("%w: delete after success: %v", ErrInternal, err)
 		}
+		// 成功后也清空答错计数，避免 key 复用时残留（key 已经硬删，无残留风险但保险起见同步清理）
+		m.failCnt.Delete(req.Key)
 	}
 	return nil
 }
 
+// recordFail 自增 key 的失败计数；累积达到 MaxFailPerKey 时立即 DeleteByKey 并清零计数。
+//
+// 并发安全：
+//   - 计数本身用 atomic.Int64，LoadOrStore / Add 都是原子的；
+//   - sync.Map 只保证 map 自身的并发读写安全，**不保护指针指向的值**，
+//     因此指针所指计数器必须是 atomic 类型（或加 Mutex 保护）；
+//   - 多个 goroutine 并发对同一 key 调 recordFail 时，每次 Add(1) 都会
+//     被观察到，不会因丢失更新导致 counter 涨不到 MaxFailPerKey。
+//
+// 计数项携带 expiresAt，使 cleanupLazy 能按过期时间回收内存（详见该函数注释）。
+// expiresAt 第一次遇到该 key 时确定，之后即使再次失败也不会变（captcha 不修改过期时间）。
+func (m *Manager) recordFail(key string, expiresAt time.Time, ctx context.Context) {
+	entry, _ := m.failCnt.LoadOrStore(key, &failEntry{cnt: new(atomic.Int64), expiresAt: expiresAt})
+	e := entry.(*failEntry)
+	cur := e.cnt.Add(1)
+	if cur >= int64(MaxFailPerKey) {
+		_ = m.repo.DeleteByKey(ctx, key)
+		m.failCnt.Delete(key)
+	}
+}
+
+// ResetFailForTest 清空失败计数；专供测试（避免不同测试间残留）。
+func (m *Manager) ResetFailForTest() {
+	m.failCnt.Range(func(k, _ any) bool {
+		m.failCnt.Delete(k)
+		return true
+	})
+}
+
+// withinTolerance 比对用户点 p 与放置点 pl 的欧氏距离是否在 pl.Kind 对应的容差半径内。
+func withinTolerance(p Point, pl PlacedElem) bool {
+	radius := ToleranceRadiusText
+	if pl.Kind == KindIcon {
+		radius = ToleranceRadiusIcon
+	}
+	dx := p.X - pl.CX
+	dy := p.Y - pl.CY
+	return dx*dx+dy*dy <= radius*radius
+}
+
+// encodeStoredInfo 把 StoredInfo 序列化为紧凑 JSON 字符串；Points 按序输出便于调试。
+func encodeStoredInfo(info StoredInfo) (string, error) {
+	b, err := json.Marshal(info)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// decodeStoredInfo 反序列化 captchas.Info 字段。
+func decodeStoredInfo(raw string) (StoredInfo, error) {
+	var info StoredInfo
+	if err := json.Unmarshal([]byte(raw), &info); err != nil {
+		return StoredInfo{}, err
+	}
+	return info, nil
+}
+
 // cleanupLazy 每次使用触发一次懒清理。失败吞掉不外抛（清理失败不应阻断主流程）。
+//
+// 同时清理 DB（DeleteExpired）与内存答错计数 map（failCnt）。
+// 计数项的 expiresAt 由 recordFail 在首次失败时写入，DB 过期清理时计数项
+// 不再被任何代码路径引用——若不在这里同步剔除，会随时间无界增长，
+// 违反设计 D4「过期清理会带走计数」的承诺。
 func (m *Manager) cleanupLazy(ctx context.Context) {
 	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, _ = m.repo.DeleteExpired(cleanupCtx, time.Now())
+	now := time.Now()
+	_, _ = m.repo.DeleteExpired(cleanupCtx, now)
+
+	// pruneFailCnt 遍历 failCnt，剔除 expiresAt < now 的项。
+	// 用 Range + Delete（不是 LoadAndDelete）是安全的：即便 prune 与并发
+	// recordFail 撞车，最坏也只是「已删除的项又被 LoadOrStore 重建一次」
+	// 或「未删除的项被下一次 prune 清掉」，两种情况都是幂等的。
+	m.failCnt.Range(func(k, v any) bool {
+		e, ok := v.(*failEntry)
+		if !ok {
+			m.failCnt.Delete(k)
+			return true
+		}
+		if !e.expiresAt.After(now) {
+			m.failCnt.Delete(k)
+		}
+		return true
+	})
 }
 
 // hashAnswer 计算答案序列的 sha1 hex 摘要。
@@ -356,31 +527,39 @@ func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetyp
 	canvas := image.NewRGBA(bg.Bounds())
 	draw.Draw(canvas, canvas.Bounds(), bg, image.Point{}, draw.Src)
 
-	correct, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.Length, rng)
+	correct, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.Length, nil, rng)
 	if err != nil {
 		return nil, err
 	}
-	noise, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.NoiseLength, rng)
+	// 从噪声池里排除已选中的正确答案名，避免出现两张视觉相同、坐标却只对其中一张有效的"陷阱图"
+	// （Codex review 指出此类约 9% 概率出现，用户点击"对的那张"反而会被 withinTolerance 判为 Mismatch）。
+	exclude := make(map[string]struct{}, len(correct))
+	for _, n := range correct {
+		exclude[n] = struct{}{}
+	}
+	noise, err := pickElems(cfg.Elements, icons, cfg.ChineseChars, cfg.NoiseLength, exclude, rng)
 	if err != nil {
 		return nil, err
 	}
 
 	var used []placedRect
-	var answerOrder []string
+	var placed []PlacedElem
+	var elements []string
 
 	// 先放正确答案（顺序敏感）
 	for _, name := range correct {
-		rect, err := placeElem(canvas, name, icons, font, rng, used)
+		cx, cy, kind, rect, err := placeElem(canvas, name, icons, font, rng, used)
 		if err != nil {
 			return nil, fmt.Errorf("place answer %s: %w", name, err)
 		}
 		used = append(used, rect)
-		answerOrder = append(answerOrder, name)
+		placed = append(placed, PlacedElem{Name: name, CX: cx, CY: cy, Kind: kind})
+		elements = append(elements, name)
 	}
 
 	// 再放干扰元素（放不下跳过，不致命）
 	for _, name := range noise {
-		rect, err := placeElem(canvas, name, icons, font, rng, used)
+		_, _, _, rect, err := placeElem(canvas, name, icons, font, rng, used)
 		if err != nil {
 			continue
 		}
@@ -388,20 +567,27 @@ func composeImage(bgs []image.Image, icons map[string]image.Image, font *truetyp
 	}
 
 	return &composeResult{
-		Image:       canvas,
-		AnswerOrder: answerOrder,
-		Width:       canvas.Bounds().Dx(),
-		Height:      canvas.Bounds().Dy(),
+		Image:    canvas,
+		Placed:   placed,
+		Elements: elements,
+		Width:    canvas.Bounds().Dx(),
+		Height:   canvas.Bounds().Dy(),
 	}, nil
 }
 
 // placeElem 尝试放置一个元素；最多 maxPlaceTries 次，失败返 ErrInternal。
-func placeElem(canvas draw.Image, name string, icons map[string]image.Image, font *truetype.Font, rng *rand.Rand, used []placedRect) (placedRect, error) {
+// 返回 (cx, cy, kind, rect)：cx/cy 是元素在 canvas 上的中心坐标，kind 用于 verify 时选容差半径。
+func placeElem(canvas draw.Image, name string, icons map[string]image.Image, font *truetype.Font, rng *rand.Rand, used []placedRect) (cx, cy int, kind string, rect placedRect, err error) {
 	w, h := elemSize(name, icons)
+	if _, ok := icons[name]; ok {
+		kind = KindIcon
+	} else {
+		kind = KindText
+	}
 	for i := 0; i < maxPlaceTries; i++ {
-		cx := rng.Intn(bgWidth)
-		cy := rng.Intn(bgHeight)
-		rect := placedRect{x: cx - w/2, y: cy - h/2, w: w, h: h}
+		cx = rng.Intn(bgWidth)
+		cy = rng.Intn(bgHeight)
+		rect = placedRect{x: cx - w/2, y: cy - h/2, w: w, h: h}
 		if rect.x < 0 || rect.y < 0 || rect.x+w > bgWidth || rect.y+h > bgHeight {
 			continue
 		}
@@ -409,11 +595,11 @@ func placeElem(canvas draw.Image, name string, icons map[string]image.Image, fon
 			continue
 		}
 		if err := drawElem(canvas, cx, cy, random.Color(rng), name, font, icons); err != nil {
-			return placedRect{}, err
+			return 0, 0, "", placedRect{}, err
 		}
-		return rect, nil
+		return cx, cy, kind, rect, nil
 	}
-	return placedRect{}, fmt.Errorf("%w: place %s: no free spot after %d tries", ErrInternal, name, maxPlaceTries)
+	return 0, 0, "", placedRect{}, fmt.Errorf("%w: place %s: no free spot after %d tries", ErrInternal, name, maxPlaceTries)
 }
 
 // checkCollision 标准 AABB 重叠检测。
@@ -465,11 +651,21 @@ func drawElem(canvas draw.Image, cx, cy int, col color.RGBA, name string, font *
 // ============================================================
 
 // pickElems 从已启用的元素类型池里随机抽 count 个互不相同的元素。
-func pickElems(enabled []string, icons map[string]image.Image, chineseChars []string, count int, rng *rand.Rand) ([]string, error) {
+func pickElems(enabled []string, icons map[string]image.Image, chineseChars []string, count int, exclude map[string]struct{}, rng *rand.Rand) ([]string, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("%w: count must be positive", ErrInvalidInput)
 	}
 	pool := expandEnabled(enabled, icons, chineseChars)
+	if exclude != nil {
+		filtered := pool[:0]
+		for _, p := range pool {
+			if _, skip := exclude[p]; skip {
+				continue
+			}
+			filtered = append(filtered, p)
+		}
+		pool = filtered
+	}
 	if len(pool) == 0 {
 		return nil, fmt.Errorf("%w: enabled elements expand to empty pool", ErrInvalidInput)
 	}

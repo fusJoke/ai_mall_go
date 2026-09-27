@@ -19,10 +19,19 @@ export interface AdminInfo {
 
 /**
  * 管理员登录请求体 —— 与后端 internal/handler/admin/admin.go LoginRequest 对齐。
+ *
+ * 点选验证码集成（click-captcha change）后，登录链路为：
+ *   1. 前端弹窗组件预检通过 → 拿到 captchaKey
+ *   2. 预检的同时也拿到用户点击的 points（图片原始 350×200 坐标）
+ *   3. login() 同时携带 captchaKey + points；后端做 consume 二次校验
+ *
+ * 缺 captchaKey/points 会触发 400 login.invalid_input。
  */
 export interface LoginRequest {
     username: string
     password: string
+    captcha_key: string
+    points: { x: number; y: number }[]
     remember: boolean
 }
 

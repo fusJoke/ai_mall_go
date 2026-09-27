@@ -17,6 +17,7 @@ import (
 
 	"ai-go-mall/internal/model"
 	adminRepo "ai-go-mall/internal/repository/admin"
+	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/service"
 )
 
@@ -26,6 +27,18 @@ import (
 // 但能让 service 层测试不依赖真实 token.Manager（也就无需真实 DB）。
 type tokenIssuer interface {
 	Create(ctx context.Context, t *model.Token) error
+}
+
+// captchaVerifier 是 service 层对点选验证码「消费型 verify」的最小抽象。
+//
+// *infra/captcha.Manager 满足此接口；测试可注入 mock。
+// 设计为最小接口（只暴露 VerifyClick），是为了避免 service/admin 对
+// infra/captcha 包的过度耦合。
+//
+// `verifyCaptcha` 入参 (key, points, w, h) 与业务一致；
+// deleteOnSuccess=true 表示「消费型」（登录链路二次校验）。
+type captchaVerifier interface {
+	VerifyClick(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error
 }
 
 // token 有效期常量（管理员登录场景）。
@@ -45,10 +58,11 @@ const (
 // 未来如果加 "refresh" / "api" 等类型时再抽 enum 或挪到 model 包。
 const tokenTypeAdmin = "admin"
 
-// 通用错误：用户名 / 密码不匹配 / 账号被禁用。统一文案避免泄露用户名是否存在。
+// 通用错误：用户名 / 密码不匹配 / 账号被禁用 / 验证码错误。统一文案避免泄露用户名是否存在。
 var (
 	ErrInvalidCredentials = errors.New("admin: invalid username or password")
 	ErrAccountDisabled    = errors.New("admin: account disabled")
+	ErrInvalidCaptcha     = errors.New("admin: invalid captcha")
 )
 
 // Service 是管理员实体的业务接口。
@@ -57,43 +71,57 @@ var (
 type Service interface {
 	service.CRUDService[model.Admin]
 
-	// Login 校验用户名 + 密码；成功返回管理员记录 + 明文 token（Password 字段是哈希，调用方不应原样返回）。
+	// Login 校验「点选验证码 + 用户名 + 密码」；成功返回管理员记录 + 明文 token
+	// （Password 字段是哈希，调用方不应原样返回）。
 	//
-	// 业务规则：
-	//   - 用户名 / 密码任意一项错误统一返回 ErrInvalidCredentials，不泄露用户名是否存在。
-	//   - 账号 Status != 1 直接返回 ErrAccountDisabled。
-	//   - 登录成功：LoginFailure 清零、LastLoginAt = now、LastLoginIp = c.ClientIP()，
+	// 业务规则（按顺序门控，任一环节失败立即终止）：
+	//  1. captcha 二次校验通过（consume 语义，deleteOnSuccess=true）。
+	//  2. 用户名 / 密码任意一项错误统一返回 ErrInvalidCredentials，不泄露用户名是否存在。
+	//  3. 账号 Status != 1 直接返回 ErrAccountDisabled。
+	//  4. 登录成功：LoginFailure 清零、LastLoginAt = now、LastLoginIp = c.ClientIP()，
 	//     并签发 token（remember=true → TokenTTLRemember，否则 TokenTTLShort）。
-	//   - 登录失败：LoginFailure 自增并落库；不签发 token。
-	//   - token 落库失败：返回 error（admin 状态更新已落库，前端应提示重试）。
-	Login(c *gin.Context, username, password string, remember bool) (*model.Admin, string, error)
+	//  5. token 落库失败：返回 error（admin 状态更新已落库，前端应提示重试）。
+	Login(c *gin.Context, username, password, captchaKey string, points []captchaInfra.Point, remember bool) (*model.Admin, string, error)
 }
 
 // baseService 是 Service 的默认实现。
 //
 // 嵌入 service.CRUDService[model.Admin] 转发通用 CRUD；
 // 额外持有 repo（adminRepo.Repository）以拿到 GetByUsername，
-// 与 tm（tokenIssuer）以签发登录 token。
+// tm（tokenIssuer）以签发登录 token，cv（captchaVerifier）以做点选验证码二次校验。
 type baseService struct {
 	service.CRUDService[model.Admin]
 	repo adminRepo.Repository
 	tm   tokenIssuer
+	cv   captchaVerifier
 }
 
-// NewService 接收 admin repo 与 token 签发器，返回 Service 接口。
-func NewService(repo adminRepo.Repository, tm tokenIssuer) Service {
+// NewService 接收 admin repo / token 签发器 / captcha 校验器，返回 Service 接口。
+func NewService(repo adminRepo.Repository, tm tokenIssuer, cv captchaVerifier) Service {
 	return &baseService{
 		CRUDService: service.NewBaseCRUDService[model.Admin](repo),
 		repo:        repo,
 		tm:          tm,
+		cv:          cv,
 	}
 }
 
 // Login 实现见 Service 注释。
 //
-// 错误顺序：先按用户名查 → 不存在即无效凭据（同时不递增计数）→ 比对哈希 →
-// 不匹配递增 LoginFailure 并落库 → 检查状态 → 通过则重置 + 更新最后登录信息 + 签发 token。
-func (s *baseService) Login(c *gin.Context, username, password string, remember bool) (*model.Admin, string, error) {
+// 顺序：captcha 二次校验 → 用户名查询 → bcrypt → 状态 → token。
+// captcha 失败立即返回 ErrInvalidCaptcha，不进入密码分支（防止脚本试探密码计数）。
+func (s *baseService) Login(c *gin.Context, username, password, captchaKey string, points []captchaInfra.Point, remember bool) (*model.Admin, string, error) {
+	// 1) 验证码二次校验（consume 语义，删除成功路径上的 key）。
+	if err := s.cv.VerifyClick(c.Request.Context(), &captchaInfra.VerifyReq{
+		Key:    captchaKey,
+		Points: points,
+		W:      captchaInfra.ImageWidth,
+		H:      captchaInfra.ImageHeight,
+	}, true); err != nil {
+		return nil, "", ErrInvalidCaptcha
+	}
+
+	// 2) 用户名查询。
 	adm, err := s.repo.GetByUsername(c, username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -102,19 +130,19 @@ func (s *baseService) Login(c *gin.Context, username, password string, remember 
 		return nil, "", err
 	}
 
-	// 密码错误：递增失败计数后返回。落库失败不阻塞登录失败响应，避免抖动。
+	// 3) 密码错误：递增失败计数后返回。落库失败不阻塞登录失败响应，避免抖动。
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(adm.Password), []byte(password)); bcryptErr != nil {
 		adm.LoginFailure++
 		_ = s.Update(c, adm)
 		return nil, "", ErrInvalidCredentials
 	}
 
-	// 状态校验必须在密码通过后做，避免禁用账号被用来探测用户名是否存在。
+	// 4) 状态校验必须在密码通过后做，避免禁用账号被用来探测用户名是否存在。
 	if adm.Status != 1 {
 		return nil, "", ErrAccountDisabled
 	}
 
-	// 登录成功：清零失败次数 + 记录最后登录。
+	// 5) 登录成功：清零失败次数 + 记录最后登录。
 	adm.LoginFailure = 0
 	now := time.Now()
 	adm.LastLoginAt = &now
@@ -124,7 +152,6 @@ func (s *baseService) Login(c *gin.Context, username, password string, remember 
 	}
 
 	// 签发 token：uuid v7 明文 + 根据 remember 选 TTL。
-	// 用 c.Request.Context() 而非 c，让 GORM 在 ctx 取消时中止查询。
 	uid, err := uuid.NewV7()
 	if err != nil {
 		return nil, "", err

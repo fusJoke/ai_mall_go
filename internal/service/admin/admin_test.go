@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/model"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/repository"
@@ -81,6 +82,33 @@ func (m *mockIssuer) Create(ctx context.Context, t *model.Token) error {
 // 编译期断言：mockIssuer 必须实现 tokenIssuer。
 var _ tokenIssuer = (*mockIssuer)(nil)
 
+// --- mock captchaVerifier ---
+
+// mockCaptcha 是 service 包内 captchaVerifier 接口的最小实现。
+//
+// verifyFunc 字段化：测试可控制 VerifyClick 的行为（成功 / 失败 / 记录入参）；
+// 默认实现为「校验通过」—— 校验流程不阻塞现有 Login 测试。
+type mockCaptcha struct {
+	verifyFunc func(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error
+
+	verifyCalls        int
+	lastReq            *captchaInfra.VerifyReq
+	lastDeleteOnSuccess bool
+}
+
+func (m *mockCaptcha) VerifyClick(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error {
+	m.verifyCalls++
+	m.lastReq = req
+	m.lastDeleteOnSuccess = deleteOnSuccess
+	if m.verifyFunc != nil {
+		return m.verifyFunc(ctx, req, deleteOnSuccess)
+	}
+	return nil
+}
+
+// 编译期断言：mockCaptcha 必须实现 captchaVerifier。
+var _ captchaVerifier = (*mockCaptcha)(nil)
+
 // --- 测试 helper ---
 
 const (
@@ -103,10 +131,16 @@ func newTestAdmin(t *testing.T) *model.Admin {
 	}
 }
 
-// newService 拼装测试用的 Service：mockRepo + mockIssuer。
-func newService(repo *mockRepo, iss *mockIssuer) Service {
-	return NewService(repo, iss)
+// newService 拼装测试用的 Service：mockRepo + mockIssuer + mockCaptcha（默认 captcha 校验通过）。
+func newService(repo *mockRepo, iss *mockIssuer, captcha *mockCaptcha) Service {
+	if captcha == nil {
+		captcha = &mockCaptcha{}
+	}
+	return NewService(repo, iss, captcha)
 }
+
+// testPoints 是 login 测试用的默认 captcha points（任意 2 个点）。
+var testPoints = []captchaInfra.Point{{X: 100, Y: 80}, {X: 200, Y: 120}}
 
 // newTestContext 返回一个非 nil 的 *gin.Context（用 gin.CreateTestContext + 手动挂 Request）。
 //
@@ -127,9 +161,10 @@ func TestLogin_UserNotFound(t *testing.T) {
 		},
 	}
 	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
-	adm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, false)
+	svc := newService(repo, iss, captcha)
+	adm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
 
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("Login = %v, want ErrInvalidCredentials", err)
@@ -153,9 +188,10 @@ func TestLogin_WrongPassword(t *testing.T) {
 		},
 	}
 	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
-	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, "wrong-password", false)
+	svc := newService(repo, iss, captcha)
+	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, "wrong-password", "cap-key", testPoints, false)
 
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("Login = %v, want ErrInvalidCredentials", err)
@@ -184,9 +220,10 @@ func TestLogin_AccountDisabled(t *testing.T) {
 		},
 	}
 	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
-	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, false)
+	svc := newService(repo, iss, captcha)
+	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
 
 	if !errors.Is(err, ErrAccountDisabled) {
 		t.Errorf("Login = %v, want ErrAccountDisabled", err)
@@ -207,10 +244,11 @@ func TestLogin_Success_NoRemember_3DayTTL(t *testing.T) {
 		},
 	}
 	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
+	svc := newService(repo, iss, captcha)
 	before := time.Now()
-	gotAdm, rawToken, err := svc.Login(newTestContext(), testUsername, testPassword, false)
+	gotAdm, rawToken, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
 	after := time.Now()
 
 	if err != nil {
@@ -254,10 +292,11 @@ func TestLogin_Success_Remember_30DayTTL(t *testing.T) {
 		},
 	}
 	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
+	svc := newService(repo, iss, captcha)
 	before := time.Now()
-	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, true)
+	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, true)
 	after := time.Now()
 
 	if err != nil {
@@ -287,9 +326,10 @@ func TestLogin_TokenCreateFails(t *testing.T) {
 			return wantErr
 		},
 	}
+	captcha := &mockCaptcha{}
 
-	svc := newService(repo, iss)
-	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, false)
+	svc := newService(repo, iss, captcha)
+	gotAdm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
 
 	if !errors.Is(err, wantErr) {
 		t.Errorf("Login = %v, want %v", err, wantErr)
@@ -300,5 +340,94 @@ func TestLogin_TokenCreateFails(t *testing.T) {
 	// admin Update 已经被调一次（写 LastLoginAt 等），这是已知折中
 	if repo.updateCalls != 1 {
 		t.Errorf("repo.Update called %d times, want 1", repo.updateCalls)
+	}
+}
+
+// TestLogin_CaptchaFailed_ShortCircuits 验证 captcha 二次校验失败时立即返回 ErrInvalidCaptcha，
+// 不进入密码分支（GetByUsername / bcrypt 都不会被触发）。
+func TestLogin_CaptchaFailed_ShortCircuits(t *testing.T) {
+	wantErr := errors.New("captcha mismatch")
+	captcha := &mockCaptcha{
+		verifyFunc: func(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error {
+			return wantErr
+		},
+	}
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			t.Errorf("repo.GetByUsername should NOT be called when captcha fails")
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+	iss := &mockIssuer{}
+
+	svc := newService(repo, iss, captcha)
+	adm, tok, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
+
+	if !errors.Is(err, ErrInvalidCaptcha) {
+		t.Errorf("Login = %v, want ErrInvalidCaptcha", err)
+	}
+	if adm != nil || tok != "" {
+		t.Errorf("Login returned non-zero on captcha fail, got (%+v, %q)", adm, tok)
+	}
+	if iss.createCalls != 0 {
+		t.Errorf("issuer.Create called %d times on captcha fail, want 0", iss.createCalls)
+	}
+	if captcha.verifyCalls != 1 {
+		t.Errorf("captcha.Verify called %d times, want 1", captcha.verifyCalls)
+	}
+	if !captcha.lastDeleteOnSuccess {
+		t.Errorf("captcha.Verify should be consume-mode (deleteOnSuccess=true), got false")
+	}
+}
+
+// TestLogin_CaptchaPassed_ProceedsToPassword 验证 captcha 通过后正常走完密码 + token 签发。
+func TestLogin_CaptchaPassed_ProceedsToPassword(t *testing.T) {
+	adm := newTestAdmin(t)
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
+
+	if err != nil {
+		t.Fatalf("Login = %v, want nil", err)
+	}
+	if captcha.verifyCalls != 1 {
+		t.Errorf("captcha.Verify called %d times, want 1", captcha.verifyCalls)
+	}
+	if iss.createCalls != 1 {
+		t.Errorf("issuer.Create called %d times, want 1", iss.createCalls)
+	}
+}
+
+// TestLogin_EmptyCaptchaKey_StillGoesThroughCaptcha 验证空 captchaKey 时仍走 captcha 校验；
+// mockCaptcha 默认通过，验证后续进入密码分支。
+func TestLogin_EmptyCaptchaKey_StillGoesThroughCaptcha(t *testing.T) {
+	adm := newTestAdmin(t)
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{
+		verifyFunc: func(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error {
+			// 空 key 应被 infra 层挡掉；这里用 mock 模拟成功，验证链路流转。
+			if req.Key != "" {
+				t.Errorf("captcha.Verify req.Key = %q, want empty", req.Key)
+			}
+			return nil
+		},
+	}
+
+	svc := newService(repo, iss, captcha)
+	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, "", testPoints, false)
+	if err != nil {
+		t.Fatalf("Login = %v, want nil", err)
 	}
 }

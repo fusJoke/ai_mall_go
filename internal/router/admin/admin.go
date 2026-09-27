@@ -8,24 +8,44 @@ package admin
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
-	adminHandler "ai-go-mall/internal/handler/admin"
+	"ai-go-mall/internal/handler/admin"
+	captchaInfra "ai-go-mall/internal/infra/captcha"
+	"ai-go-mall/internal/infra/token"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/router/registry"
 	adminService "ai-go-mall/internal/service/admin"
-	"ai-go-mall/internal/infra/token"
 )
 
-// 在包加载期一次性把 admin 的 repo → tokenMgr → service → handler 链路接好。
-// router 层持有依赖装配逻辑，业务包保持纯净（不感知 HTTP）。
+// adminRepoInstance 仍可在包级初始化（不依赖延迟资源）。
+var adminRepoInstance = adminRepo.NewRepository()
+
+// service/handler 延后到首次请求时再装配：
+// 它们依赖 token.Get() 与 captchaInfra.GetManager()，两者均由 cmd/serve/main()
+// 启动期调用 Init() 完成；包级 var 阶段拿到的可能仍是 nil，会让 Login 走到
+// token / captcha 写入时空指针 panic。
+//
+// 用 sync.Once 锁住首调装配，保证并发安全 + 只装配一次。
 var (
-	adminRepoInstance    = adminRepo.NewRepository()
-	adminTokenInstance   = token.Get()
-	adminServiceInstance = adminService.NewService(adminRepoInstance, adminTokenInstance)
-	adminHandlerInstance = adminHandler.NewHandler(adminServiceInstance)
+	serviceOnce      sync.Once
+	adminSvcInstance adminService.Service
+	adminHandlerInst *admin.Handler
 )
+
+func ensureDeps() {
+	serviceOnce.Do(func() {
+		mgr, err := captchaInfra.GetManager()
+		if err != nil {
+			// 启动期 captcha 配置不健全 → 让进程崩比带着坏依赖运行更安全。
+			panic("admin: captcha manager init failed: " + err.Error())
+		}
+		adminSvcInstance = adminService.NewService(adminRepoInstance, token.Get(), mgr)
+		adminHandlerInst = admin.NewHandler(adminSvcInstance)
+	})
+}
 
 func init() {
 	registry.Register("/admin", http.MethodGet, "/ping", func(c *gin.Context) {
@@ -33,5 +53,9 @@ func init() {
 	})
 
 	// POST /admin/login —— 管理员登录。
-	registry.Register("/admin", http.MethodPost, "/login", adminHandlerInstance.Login)
+	// 包一层确保依赖装配好再转发给 handler，避免 token.Manager 还未初始化就被捕获。
+	registry.Register("/admin", http.MethodPost, "/login", func(c *gin.Context) {
+		ensureDeps()
+		adminHandlerInst.Login(c)
+	})
 }

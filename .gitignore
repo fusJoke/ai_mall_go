@@ -39,3 +39,9 @@ coverage.html
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ===== 本地调试残留 =====
+# Playwright MCP 在浏览器自动化过程中产生的中间产物
+.playwright-mcp/
+# 一次性调试截图，例如 e2e 失败时手动截屏
+/login-error.png

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/handler"
 	"ai-go-mall/internal/model"
 	adminSvc "ai-go-mall/internal/service/admin"
@@ -42,9 +43,23 @@ type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 
+	// CaptchaKey 来源于点选验证码预检通过后回调透传的 key；
+	// 缺 / 空 走 400，service 层做二次校验（consume 语义）。
+	CaptchaKey string `json:"captcha_key" binding:"required"`
+
+	// Points 是用户在图片坐标系下的点击坐标（按 elements 顺序）。
+	// 与 captchaKey 一起透传给 service，做二次校验。
+	Points []CaptchaPoint `json:"points" binding:"required"`
+
 	// Remember "记住我"：true → token 有效期 30 天；false（缺省）→ 3 天。
 	// 前端不传时 Go 零值是 false，无需 omitempty。
 	Remember bool `json:"remember"`
+}
+
+// CaptchaPoint 是 LoginRequest 内嵌的点选坐标。
+type CaptchaPoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
 }
 
 // LoginResponse 是登录成功后的返回。
@@ -75,19 +90,41 @@ type adminInfo struct {
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "login.invalid_input",
+			"message": err.Error(),
+		})
 		return
 	}
 
-	adm, rawToken, err := h.svc.Login(c, req.Username, req.Password, req.Remember)
+	points := make([]captchaInfra.Point, len(req.Points))
+	for i, p := range req.Points {
+		points[i] = captchaInfra.Point{X: p.X, Y: p.Y}
+	}
+
+	adm, rawToken, err := h.svc.Login(c, req.Username, req.Password, req.CaptchaKey, points, req.Remember)
 	if err != nil {
 		switch {
 		case errors.Is(err, adminSvc.ErrInvalidCredentials):
-			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    "login.invalid_credentials",
+				"message": err.Error(),
+			})
 		case errors.Is(err, adminSvc.ErrAccountDisabled):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    "login.account_disabled",
+				"message": err.Error(),
+			})
+		case errors.Is(err, adminSvc.ErrInvalidCaptcha):
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    "login.invalid_captcha",
+				"message": err.Error(),
+			})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    "login.internal",
+				"message": err.Error(),
+			})
 		}
 		return
 	}
