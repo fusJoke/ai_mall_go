@@ -62,16 +62,24 @@ var _ adminRepo.Repository = (*mockRepo)(nil)
 
 // mockIssuer 是 service 包内 tokenIssuer 接口的最小实现。
 //
-// createFunc / deleteFunc 字段化：测试可控制 Create / Delete 的行为（成功 / 失败 / 记录入参）。
+// createFunc / deleteFunc / clearFunc 字段化：测试可控制 Create / Delete / Clear 的行为
+// （成功 / 失败 / 记录入参）。
 type mockIssuer struct {
 	createFunc func(ctx context.Context, t *model.Token) error
 	deleteFunc func(ctx context.Context, rawToken string) error
+	clearFunc  func(ctx context.Context, userID int64, tokenType string) error
 
 	createCalls int
 	lastToken   *model.Token
 
 	deleteCalls int
 	lastDelete  string
+
+	clearCalls int
+	lastClear  struct {
+		UserID    int64
+		TokenType string
+	}
 }
 
 func (m *mockIssuer) Create(ctx context.Context, t *model.Token) error {
@@ -88,6 +96,16 @@ func (m *mockIssuer) Delete(ctx context.Context, rawToken string) error {
 	m.lastDelete = rawToken
 	if m.deleteFunc != nil {
 		return m.deleteFunc(ctx, rawToken)
+	}
+	return nil
+}
+
+func (m *mockIssuer) Clear(ctx context.Context, userID int64, tokenType string) error {
+	m.clearCalls++
+	m.lastClear.UserID = userID
+	m.lastClear.TokenType = tokenType
+	if m.clearFunc != nil {
+		return m.clearFunc(ctx, userID, tokenType)
 	}
 	return nil
 }
@@ -224,8 +242,152 @@ func TestLogin_WrongPassword(t *testing.T) {
 	}
 }
 
-// TestLogin_WrongPassword_LocksAtThreshold 与 TestLogin_WrongPassword_BelowThreshold_NoClear 等
-// 锁定相关用例与「MaxLoginFailure / tm.Clear」一起引入，放在 lockout commit 单独提交。
+// TestLogin_WrongPassword_LocksAtThreshold 验证：密码错误且累计 LoginFailure 已到
+// 阈值（4 → 5）时，admin.Status 被置 0 触发账号锁定；Update 落库带 LoginFailure=5 / Status=0；
+// 且 tm.Clear 被同步调用一次以吊销该 admin 既有 token。
+//
+// 与 TestLogin_WrongPassword 互补：后者从 0 起步，本测试从「再错一次就锁」起步，
+// 一起覆盖阈值以下 / 阈值触发的两种边界。
+func TestLogin_WrongPassword_LocksAtThreshold(t *testing.T) {
+	adm := newTestAdmin(t)
+	// 让首次失败直接命中阈值：起始计数 4，加 1 后 = MaxLoginFailure → 锁定。
+	adm.LoginFailure = MaxLoginFailure - 1
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	_, tok, err := svc.Login(newTestContext(), testUsername, "wrong-password", "cap-key", testPoints, false)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("Login = %v, want ErrInvalidCredentials", err)
+	}
+	if tok != "" {
+		t.Errorf("Login returned token on invalid creds, got %q", tok)
+	}
+	if iss.createCalls != 0 {
+		t.Errorf("issuer.Create called %d times on invalid creds, want 0", iss.createCalls)
+	}
+	if repo.updateCalls != 1 {
+		t.Fatalf("repo.Update called %d times, want 1", repo.updateCalls)
+	}
+	if repo.lastUpdate == nil {
+		t.Fatal("repo.lastUpdate is nil after Update")
+	}
+	if repo.lastUpdate.LoginFailure != MaxLoginFailure {
+		t.Errorf("repo.lastUpdate.LoginFailure = %d, want %d", repo.lastUpdate.LoginFailure, MaxLoginFailure)
+	}
+	if repo.lastUpdate.Status != 0 {
+		t.Errorf("repo.lastUpdate.Status = %d, want 0 (locked)", repo.lastUpdate.Status)
+	}
+	// N2: 锁定同步触发 token 吊销。
+	if iss.clearCalls != 1 {
+		t.Errorf("issuer.Clear called %d times on lockout, want 1", iss.clearCalls)
+	}
+	if iss.lastClear.UserID != adm.ID {
+		t.Errorf("issuer.Clear userID = %d, want %d", iss.lastClear.UserID, adm.ID)
+	}
+	if iss.lastClear.TokenType != tokenTypeAdmin {
+		t.Errorf("issuer.Clear tokenType = %q, want %q", iss.lastClear.TokenType, tokenTypeAdmin)
+	}
+}
+
+// TestLogin_WrongPassword_BelowThreshold_NoClear 验证：密码错误但未达阈值时
+// tm.Clear 不被调用 —— Clear 只在「首次跨过阈值」的锁定事件触发，不在每次错密码时都跑。
+//
+// 防止回归：之前有一次错误实现是「每次错密码都 Clear」，会把正常用户踢下线。
+func TestLogin_WrongPassword_BelowThreshold_NoClear(t *testing.T) {
+	adm := newTestAdmin(t)
+	adm.LoginFailure = 0 // 远低于阈值
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	_, _, err := svc.Login(newTestContext(), testUsername, "wrong-password", "cap-key", testPoints, false)
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("Login = %v, want ErrInvalidCredentials", err)
+	}
+	if iss.clearCalls != 0 {
+		t.Errorf("issuer.Clear called %d times below threshold, want 0", iss.clearCalls)
+	}
+	if repo.lastUpdate == nil || repo.lastUpdate.Status != 1 {
+		t.Errorf("repo.Update should keep Status=1 below threshold, got %+v", repo.lastUpdate)
+	}
+}
+
+// TestLogin_LockedAccount_RejectsCorrectPassword 验证：被锁定（Status=0）的账号即便
+// 密码正确也走状态分支返回 ErrAccountDisabled，不会签发 token。
+//
+// 这条路径在「锁定被触发后，正主来登录」场景下生效；现有的 TestLogin_AccountDisabled
+// 也是这条路径，只是测试构造方式不同（手动设 Status=0），这里专门从锁定结果回头测。
+func TestLogin_LockedAccount_RejectsCorrectPassword(t *testing.T) {
+	adm := newTestAdmin(t)
+	adm.Status = 0
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	_, tok, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
+
+	if !errors.Is(err, ErrAccountDisabled) {
+		t.Errorf("Login = %v, want ErrAccountDisabled", err)
+	}
+	if tok != "" {
+		t.Errorf("Login returned token on locked account, got %q", tok)
+	}
+	if iss.createCalls != 0 {
+		t.Errorf("issuer.Create called %d times on locked account, want 0", iss.createCalls)
+	}
+}
+
+// TestLogin_Success_ResetsLoginFailure 验证：登录成功会把 LoginFailure 清零（不只更新 last-login 字段）。
+//
+// 之前 TestLogin_Success_* 只检查 token 签发，没断言 LoginFailure 复位行为；
+// 现在锁定阈值生效后这个回归点必须显式覆盖，避免「LoginFailure 越攒越多导致误锁」。
+func TestLogin_Success_ResetsLoginFailure(t *testing.T) {
+	adm := newTestAdmin(t)
+	adm.LoginFailure = 3 // 模拟「之前错了几次但没锁」的状态
+	repo := &mockRepo{
+		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+			return adm, nil
+		},
+	}
+	iss := &mockIssuer{}
+	captcha := &mockCaptcha{}
+
+	svc := newService(repo, iss, captcha)
+	_, _, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false)
+	if err != nil {
+		t.Fatalf("Login = %v, want nil", err)
+	}
+	if repo.updateCalls < 1 {
+		t.Fatalf("repo.Update called %d times, want >=1", repo.updateCalls)
+	}
+	if repo.lastUpdate == nil {
+		t.Fatal("repo.lastUpdate is nil after Update")
+	}
+	if repo.lastUpdate.LoginFailure != 0 {
+		t.Errorf("repo.lastUpdate.LoginFailure = %d, want 0 (reset on success)", repo.lastUpdate.LoginFailure)
+	}
+	if repo.lastUpdate.Status != 1 {
+		t.Errorf("repo.lastUpdate.Status = %d, want 1 (unchanged on success)", repo.lastUpdate.Status)
+	}
+}
 
 func TestLogin_AccountDisabled(t *testing.T) {
 	adm := newTestAdmin(t)

@@ -15,6 +15,7 @@ import (
 	"ai-go-mall/internal/handler/admin"
 	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/infra/token"
+	"ai-go-mall/internal/middleware"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/router/registry"
 	adminService "ai-go-mall/internal/service/admin"
@@ -48,11 +49,13 @@ func ensureDeps() {
 }
 
 func init() {
+	// GET /admin/ping —— 健康探针，必须带合法 Bearer token 才能访问；
+	// 顺带充当 AdminAuth 中间件的 smoke target（其他 admin CRUD 路由同理挂上）。
 	registry.Register("/admin", http.MethodGet, "/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "admin pong"})
-	})
+	}, middleware.AdminAuth())
 
-	// POST /admin/login —— 管理员登录。
+	// POST /admin/login —— 管理员登录（公开端点，不挂 auth）。
 	// 包一层确保依赖装配好再转发给 handler，避免 token.Manager 还未初始化就被捕获。
 	registry.Register("/admin", http.MethodPost, "/login", func(c *gin.Context) {
 		ensureDeps()

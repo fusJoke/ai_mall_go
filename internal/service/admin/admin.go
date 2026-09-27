@@ -31,6 +31,10 @@ type tokenIssuer interface {
 	// Delete 软删除 rawToken 对应的记录；幂等 —— 不存在 / 已删除 / 已过期一律返回 nil。
 	// *token.Manager.Delete 已在 internal/infra/token/token.go:131-137 实现。
 	Delete(ctx context.Context, rawToken string) error
+
+	// Clear 删除指定用户在指定 type 下的全部 token；用于「账号锁定/禁用时吊销既有会话」。
+	// *token.Manager.Clear 已在 internal/infra/token/token.go:139-145 实现。
+	Clear(ctx context.Context, userID int64, tokenType string) error
 }
 
 // captchaVerifier 是 service 层对点选验证码「消费型 verify」的最小抽象。
@@ -61,6 +65,13 @@ const (
 //
 // 未来如果加 "refresh" / "api" 等类型时再抽 enum 或挪到 model 包。
 const tokenTypeAdmin = "admin"
+
+// MaxLoginFailure 管理员连续登录失败次数阈值：超过即把 Status 置 0（禁用）。
+//
+// 触发逻辑见 Login 的密码错误分支。
+//
+// 后续若要可配置化，只需把这里改成读 config.Get().Admin.MaxLoginFailure。
+const MaxLoginFailure = 5
 
 // 通用错误：用户名 / 密码不匹配 / 账号被禁用 / 验证码错误。统一文案避免泄露用户名是否存在。
 var (
@@ -138,9 +149,15 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 		return nil, "", err
 	}
 
-	// 3) 密码错误：递增失败计数后返回。落库失败不阻塞登录失败响应，避免抖动。
+	// 3) 密码错误：递增失败计数。达到阈值就把 Status 置 0（锁定），并吊销该账号
+	// 既有 token —— 否则攻击者在被锁前签发的合法 token 在剩余 TTL 内仍能访问受保护资源。
+	// 落库 / Clear 失败不阻塞登录失败响应（防御动作，非关键路径）。
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(adm.Password), []byte(password)); bcryptErr != nil {
 		adm.LoginFailure++
+		if adm.LoginFailure >= MaxLoginFailure {
+			adm.Status = 0
+			_ = s.tm.Clear(c.Request.Context(), adm.ID, tokenTypeAdmin)
+		}
 		_ = s.Update(c, adm)
 		return nil, "", ErrInvalidCredentials
 	}

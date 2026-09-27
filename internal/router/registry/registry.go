@@ -16,26 +16,35 @@ import (
 )
 
 // Mount 是单条延迟挂载：被挂到 prefix 标识的 RouterGroup 下。
+//
+// Middleware 在 Handler 之前按声明顺序串接；空切片等价于无中间件。
+// 典型用法：把 AdminAuth 等鉴权中间件作为 variadic 传入 Register，仅
+// 受保护的路由挂上，login / logout 等公开端点保持裸挂。
 type Mount struct {
-	Prefix  string // "" 表示根，"/admin" "/user" 等表示对应子路由组
-	Method  string // HTTP 方法，"GET" "POST" ...
-	Path    string // 组内路径（不带 prefix），如 "/ping"
-	Handler gin.HandlerFunc
+	Prefix     string // "" 表示根，"/admin" "/user" 等表示对应子路由组
+	Method     string // HTTP 方法，"GET" "POST" ...
+	Path       string // 组内路径（不带 prefix），如 "/ping"
+	Middleware []gin.HandlerFunc
+	Handler    gin.HandlerFunc
 }
 
 var mounts []Mount
 
 // Register 声明一条路由挂载。一般在子路由文件的 init() 中调用。
 //
+// middleware 为可选变参：传 0 个等价于「裸挂 handler」，适合公开端点；
+// 传 1+ 个时按声明顺序在 handler 之前串接（auth 类中间件通常只放一个）。
+//
 // Setup 之后再调 Register 是 no-op 之外的编程错误：Apply 已经把 mounts 置空，
 // 后续调用会让那条路由永远挂不上去。建议在测试里加守卫，
 // 或者保持"init 期声明、main 期下发"的纪律。
-func Register(prefix, method, path string, handler gin.HandlerFunc) {
+func Register(prefix, method, path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) {
 	mounts = append(mounts, Mount{
-		Prefix:  prefix,
-		Method:  method,
-		Path:    path,
-		Handler: handler,
+		Prefix:     prefix,
+		Method:     method,
+		Path:       path,
+		Middleware: middleware,
+		Handler:    handler,
 	})
 }
 
@@ -62,7 +71,10 @@ func Apply(r *gin.Engine) {
 			// 上一遍已经保证存在，这里理论上走不到。
 			panic(fmt.Sprintf("router/registry: missing group for prefix %q", m.Prefix))
 		}
-		g.Handle(m.Method, m.Path, m.Handler)
+		// 串接：声明顺序的中间件 → handler。中间件空切片等价于无额外中间件。
+		chain := append([]gin.HandlerFunc{}, m.Middleware...)
+		chain = append(chain, m.Handler)
+		g.Handle(m.Method, m.Path, chain...)
 	}
 
 	// 清空挂载表：避免后续误调 Register 时旧挂载被重复挂载。

@@ -19,7 +19,9 @@ database:
     host: 127.0.0.1
     port: 3306
     username: root
-    password: "root123"
+    # 留空 —— 真值由 .env.yaml 的 database.write.password 提供（gitignored，本地覆盖）。
+    # .env.yaml.example 标注了字段路径；CI / 生产侧必须自行注入凭据。
+    password: ""
     dbname: ai-go-mall
 
     # 连接池配置
@@ -36,7 +38,8 @@ database:
     host: 127.0.0.1
     port: 3307
     username: root
-    password: "root123"
+    # 留空 —— 同 write.password，由 .env.yaml 提供。
+    password: ""
     dbname: ai-go-mall
 
     max_open_conns: 50
