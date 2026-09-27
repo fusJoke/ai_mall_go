@@ -3,6 +3,7 @@ import App from './App.vue'
 import router from './router'
 import pinia from '/@/stores/index'
 import { setupI18n } from '/@/lang/index'
+import Icon from '/@/components/icon/index.vue'
 import '/@/styles/index.scss'
 
 
@@ -10,6 +11,7 @@ import '/@/styles/index.scss'
 
 async function start() {
     const app = createApp(App)
+    app.component('Icon', Icon)
     app.use(pinia)
     await setupI18n(app)
     app.use(router)
