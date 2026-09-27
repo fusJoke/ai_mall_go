@@ -45,6 +45,14 @@ type CreateClickResp struct {
 }
 
 // CreateClick 处理 GET /common/captcha/create。
+//
+// @Summary      生成点选验证码
+// @Description  服务端生成一道点选验证码；返回的 key 须先经 /common/captcha/verify 预校验坐标精度，才能用于业务（如登录）。
+// @Tags         captcha
+// @Produce      json
+// @Success      200  {object}  captcha.CreateClickResp  "成功：返回 key / elements / image 等"
+// @Failure      500  {object}  map[string]string        "captcha.internal"
+// @Router       /common/captcha/create [get]
 func (h *Handler) CreateClick(c *gin.Context) {
 	got, err := h.svc.CreateClick(c.Request.Context())
 	if err != nil {
@@ -77,6 +85,20 @@ type Point struct {
 // VerifyClick 处理 POST /common/captcha/verify。
 //
 // 该端点固定为「预检」语义：仅校验精度，不消耗 key（deleteOnSuccess=false）。
+//
+// @Summary      校验点选坐标精度
+// @Description  仅校验坐标精度，不消耗 key（deleteOnSuccess=false）。
+// @Tags         captcha
+// @Accept       json
+// @Produce      json
+// @Param        req  body      captcha.VerifyClickReq   true  "点选坐标 + 验证码 key"
+// @Success      200  {object}  map[string]interface{}   "成功：{ ok: true }"
+// @Failure      400  {object}  map[string]string        "captcha.invalid_input"
+// @Failure      401  {object}  map[string]string        "captcha.mismatch"
+// @Failure      404  {object}  map[string]string        "captcha.not_found"
+// @Failure      410  {object}  map[string]string        "captcha.expired"
+// @Failure      500  {object}  map[string]string        "captcha.internal"
+// @Router       /common/captcha/verify [post]
 func (h *Handler) VerifyClick(c *gin.Context) {
 	var req VerifyClickReq
 	if err := c.ShouldBindJSON(&req); err != nil {

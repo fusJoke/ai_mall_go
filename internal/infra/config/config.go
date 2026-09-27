@@ -191,9 +191,16 @@ type CORSConfig struct {
 }
 
 // ServerConfig HTTP 服务配置。
+//
+// Mode 决定进程运行形态："dev" 时挂载 /swagger/*any 与更详细的运行日志，
+// "release"（默认）则只暴露业务路由。早期版本曾借 gin.Mode()（GIN_MODE
+// 环境变量）判定，但 gin 的默认 mode 即 debug——任何未显式设置 GIN_MODE=release
+// 的部署都会把 swagger UI 暴露出去，不符合"仅 dev 暴露"的承诺。改为显式应用层
+// 配置后，默认 release 必须由部署侧显式开启 dev 才会暴露 API 文档。
 type ServerConfig struct {
 	Name string `mapstructure:"name"`
 	Port int    `mapstructure:"port"`
+	Mode string `mapstructure:"mode"`
 }
 
 // DatabaseConfig 数据库配置。Type 与 Prefix 对写库与读库共享。
@@ -234,6 +241,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Token.Driver == "" {
 		c.Token.Driver = "database"
+	}
+	// Server.Mode 默认 release：dev-only 能力（如 swagger UI）必须由部署侧
+	// 显式设 server.mode: dev 才会暴露，避免任何"忘设环境变量"导致意外开放。
+	if c.Server.Mode == "" {
+		c.Server.Mode = "release"
 	}
 	// CaptchaConfig 不做兜底：所有字段必须由 captcha.yaml 显式提供。
 	// 缺失字段由使用方（infra/captcha）做语义级校验并返回 ErrInvalidInput。

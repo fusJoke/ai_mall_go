@@ -2,6 +2,9 @@
 server:
   name: ai-go-mall
   port: 8080
+  # 运行模式：dev / release。默认 release；
+  # dev 才会暴露 /swagger/*any（API 文档 + swagger UI）。
+  mode: release
 
 # 数据库配置
 database:

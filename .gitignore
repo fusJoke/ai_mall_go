@@ -40,6 +40,12 @@ coverage.html
 Thumbs.db
 desktop.ini
 
+# ===== Claude Code 本地配置 ======
+# .claude/settings.local.json 是 Claude Code 在本地运行期自动写入的
+# 机器特定配置（绝对路径、本地端口、auto-approval 规则、可能含密码的环境变量）。
+# 该文件应当 per-machine，不进版本控制；共享规则放到 .claude/settings.json。
+.claude/settings.local.json
+
 # ===== 本地调试残留 =====
 # Playwright MCP 在浏览器自动化过程中产生的中间产物
 .playwright-mcp/

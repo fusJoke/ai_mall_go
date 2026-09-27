@@ -1,0 +1,234 @@
+basePath: /
+definitions:
+  internal_handler_admin.CaptchaPoint:
+    properties:
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  internal_handler_admin.LoginRequest:
+    properties:
+      captcha_key:
+        description: |-
+          CaptchaKey 来源于点选验证码预检通过后回调透传的 key；
+          缺 / 空 走 400，service 层做二次校验（consume 语义）。
+        type: string
+      password:
+        type: string
+      points:
+        description: |-
+          Points 是用户在图片坐标系下的点击坐标（按 elements 顺序）。
+          与 captchaKey 一起透传给 service，做二次校验。
+        items:
+          $ref: '#/definitions/internal_handler_admin.CaptchaPoint'
+        type: array
+      remember:
+        description: |-
+          Remember 记住我标记；true 表示 token 有效期 30 天，false（缺省）表示 3 天。
+          前端不传时 Go 零值是 false，无需 omitempty。
+        type: boolean
+      username:
+        type: string
+    required:
+    - captcha_key
+    - password
+    - points
+    - username
+    type: object
+  internal_handler_admin.LoginResponse:
+    properties:
+      admin:
+        $ref: '#/definitions/internal_handler_admin.adminInfo'
+      token:
+        type: string
+    type: object
+  internal_handler_admin.adminInfo:
+    properties:
+      avatar:
+        type: string
+      bio:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      last_login_at:
+        type: string
+      last_login_ip:
+        type: string
+      mobile:
+        type: string
+      nickname:
+        type: string
+      status:
+        type: integer
+      username:
+        type: string
+    type: object
+  internal_handler_captcha.CreateClickResp:
+    properties:
+      elements:
+        items:
+          type: string
+        type: array
+      height:
+        type: integer
+      image:
+        type: string
+      key:
+        type: string
+      width:
+        type: integer
+    type: object
+  internal_handler_captcha.Point:
+    properties:
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  internal_handler_captcha.VerifyClickReq:
+    properties:
+      h:
+        type: integer
+      key:
+        type: string
+      points:
+        items:
+          $ref: '#/definitions/internal_handler_captcha.Point'
+        type: array
+      w:
+        type: integer
+    required:
+    - h
+    - key
+    - points
+    - w
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: AI GO MALL 后台 API 文档（仅 dev 环境暴露）。
+  title: ai-go-mall API
+  version: "1.0"
+paths:
+  /admin/login:
+    post:
+      consumes:
+      - application/json
+      description: 校验点选验证码 → 校验账号 → 签发 token；前端拿到 token 后自行保存并放入后续请求头。
+      parameters:
+      - description: 登录请求（含用户名 / 密码 / 点选坐标）
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_admin.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 登录成功
+          schema:
+            $ref: '#/definitions/internal_handler_admin.LoginResponse'
+        "400":
+          description: login.invalid_input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: login.invalid_credentials / login.invalid_captcha
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: login.account_disabled
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: login.internal
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 管理员登录
+      tags:
+      - admin
+  /common/captcha/create:
+    get:
+      description: 服务端生成一道点选验证码；返回的 key 须先经 /common/captcha/verify 预校验坐标精度，才能用于业务（如登录）。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功：返回 key / elements / image 等
+          schema:
+            $ref: '#/definitions/internal_handler_captcha.CreateClickResp'
+        "500":
+          description: captcha.internal
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 生成点选验证码
+      tags:
+      - captcha
+  /common/captcha/verify:
+    post:
+      consumes:
+      - application/json
+      description: 仅校验坐标精度，不消耗 key（deleteOnSuccess=false）。
+      parameters:
+      - description: 点选坐标 + 验证码 key
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_captcha.VerifyClickReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功：{ ok: true }'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: captcha.invalid_input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: captcha.mismatch
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: captcha.not_found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "410":
+          description: captcha.expired
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: captcha.internal
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 校验点选坐标精度
+      tags:
+      - captcha
+swagger: "2.0"

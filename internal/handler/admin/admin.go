@@ -51,7 +51,7 @@ type LoginRequest struct {
 	// 与 captchaKey 一起透传给 service，做二次校验。
 	Points []CaptchaPoint `json:"points" binding:"required"`
 
-	// Remember "记住我"：true → token 有效期 30 天；false（缺省）→ 3 天。
+	// Remember 记住我标记；true 表示 token 有效期 30 天，false（缺省）表示 3 天。
 	// 前端不传时 Go 零值是 false，无需 omitempty。
 	Remember bool `json:"remember"`
 }
@@ -87,6 +87,19 @@ type adminInfo struct {
 // Login 处理 POST /admin/login。
 //
 // body 缺字段 → 400；用户名 / 密码错 → 401（不区分）；账号禁用 → 403；成功 → 200。
+//
+// @Summary      管理员登录
+// @Description  校验点选验证码 → 校验账号 → 签发 token；前端拿到 token 后自行保存并放入后续请求头。
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        req  body      admin.LoginRequest   true  "登录请求（含用户名 / 密码 / 点选坐标）"
+// @Success      200  {object}  admin.LoginResponse  "登录成功"
+// @Failure      400  {object}  map[string]string    "login.invalid_input"
+// @Failure      401  {object}  map[string]string    "login.invalid_credentials / login.invalid_captcha"
+// @Failure      403  {object}  map[string]string    "login.account_disabled"
+// @Failure      500  {object}  map[string]string    "login.internal"
+// @Router       /admin/login [post]
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
