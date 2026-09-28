@@ -38,6 +38,7 @@ import (
 	_ "ai-go-mall/docs"
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
+	"ai-go-mall/internal/infra/migrate"
 	"ai-go-mall/internal/infra/token"
 	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/router"
@@ -45,12 +46,24 @@ import (
 
 const shutdownTimeout = 10 * time.Second
 
+// migrationsDir 是 cmd/serve 启动时查找 *.sql migration 的目录。
+//
+// 默认 `cmd/migrate/migrations`（相对 cwd），适合 `go run ./cmd/serve` 的开发态。
+// 生产部署通过 -ldflags "-X main.migrationsDir=/etc/mall/migrations" 在
+// 编译期固定绝对路径，避免运行期环境变量切换路径（spec DSN 与 migrations 路径来源）。
+//
+// 注意：不暴露给环境变量——这是 spec 的硬约束。
+var migrationsDir = "cmd/migrate/migrations"
+
 func main() {
 	if err := config.Init("."); err != nil {
 		log.Fatalf("init config: %v", err)
 	}
 	if err := database.Init(); err != nil {
 		log.Fatalf("init database: %v", err)
+	}
+	if err := runMigrations(config.Get().Database); err != nil {
+		log.Fatalf("init migrations: %v", err)
 	}
 	if err := token.Init(); err != nil {
 		log.Fatalf("init token: %v", err)
@@ -90,6 +103,22 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
+}
+
+// runMigrations 在 config.Init + database.Init 之后、HTTP server 监听之前
+// 阻塞式地把所有未应用的 up migration 应用到写库。错误返回时 main() 通过
+// log.Fatalf 退出，让进程退出码非零（spec Requirement: 启动阻塞与错误传播）。
+//
+// 为什么放在 database.Init 之后：读副本 dbresolver 在 dbresolver 回调里
+// 依赖写库 schema 存在；先把 schema 落到位再让 dbresolver 注册，避开任何
+// "dblink 暂时找不到表" 的中间态。
+func runMigrations(cfg config.DatabaseConfig) error {
+	mig, err := migrate.New(cfg, migrationsDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = mig.Close() }()
+	return mig.Up()
 }
 
 // newRouter 注册当前可用的路由。

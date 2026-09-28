@@ -23,7 +23,6 @@ import (
 	"gorm.io/plugin/dbresolver"
 
 	"ai-go-mall/internal/infra/config"
-	"ai-go-mall/internal/model"
 )
 
 // CtxKey 是 gin.Context 中存储请求作用域 *gorm.DB 的 key。
@@ -33,11 +32,11 @@ const CtxKey = "ai_go_mall.db"
 var db *gorm.DB
 
 // Init 读取 config.Get().Database，按 type 打开写库 GORM 实例，
-// 在 Read.Enabled=true 时通过 dbresolver 插件注册读副本，
-// 并对 model.All() 列出的全部模型执行 AutoMigrate。
+// 在 Read.Enabled=true 时通过 dbresolver 插件注册读副本。
 //
-// AutoMigrate 在 dbresolver 注册之前执行，确保建表语句直接打到写库，
-// 不会被路由到读副本。
+// schema 管理职责已迁移到 internal/infra/migrate（golang-migrate 文件源）；
+// 本函数不再调用 GORM AutoMigrate。新增业务表必须写一份 cmd/migrate/migrations/
+// 下的 SQL 文件，由启动钩子 migrate.Up() 统一建表。
 //
 // 同一进程重复调用是 no-op；如需强制重载，调用 Reset 后再调用 Init。
 func Init() error {
@@ -50,10 +49,6 @@ func Init() error {
 	opened, err := openWrite(dbCfg)
 	if err != nil {
 		return err
-	}
-
-	if err := opened.AutoMigrate(model.All()...); err != nil {
-		return fmt.Errorf("auto migrate: %w", err)
 	}
 
 	if dbCfg.Read.Enabled {
