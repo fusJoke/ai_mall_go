@@ -5,6 +5,11 @@ server:
   # 运行模式：dev / release。默认 release；
   # dev 才会暴露 /swagger/*any（API 文档 + swagger UI）。
   mode: release
+  # 内容分发网络 URL（末尾不带 `/`）。
+  # 留空 → 不使用 CDN，FullURL 走当前请求域名。
+  cdn_url: ""
+  # 内容分发网络 URL 参数，将自动拼接到 cdn_url 结尾（值如 format/heif）。
+  cdn_url_params: ""
 
 # 数据库配置
 database:

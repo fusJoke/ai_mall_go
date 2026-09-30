@@ -1,0 +1,22 @@
+# upload.yaml 的示例 / 占位模板。
+#
+# 复制为 config/upload.yaml 后改 <...> 占位即可。本文件不参与加载
+#（loader 会跳过 .example 后缀的文件，详见 internal/infra/config）。
+
+upload:
+  driver: <local | oss | s3>   # 当前仅 "local" 落地
+
+  max_size: <整数>
+  max_size_unit: <B | KB | MB | GB>
+
+  suffixes:
+    - <jpg>
+    - <jpeg>
+    - <png>
+    # ... 按需追加
+
+  format: "/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}"
+
+  local:
+    base_dir: <绝对路径或相对项目根的路径>
+    url_prefix: <HTTP 路径前缀，如 /uploads>

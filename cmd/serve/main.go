@@ -40,6 +40,7 @@ import (
 	"ai-go-mall/internal/infra/database"
 	"ai-go-mall/internal/infra/migrate"
 	"ai-go-mall/internal/infra/token"
+	"ai-go-mall/internal/infra/upload"
 	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/router"
 )
@@ -67,6 +68,9 @@ func main() {
 	}
 	if err := token.Init(); err != nil {
 		log.Fatalf("init token: %v", err)
+	}
+	if err := upload.Init(); err != nil {
+		log.Fatalf("init upload: %v", err)
 	}
 	cfg := config.Get()
 

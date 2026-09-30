@@ -1,0 +1,46 @@
+# 文件上传配置。
+#
+# 该文件由 internal/infra/config 自动加载（与 config/*.yaml 同顺序合并）。
+# 缺失文件也能启动 —— applyDefaults() 会填入下方同样的默认值。
+# 字段语义详见 internal/infra/config/config.go 的 UploadConfig。
+
+upload:
+  # 存储驱动名。当前仅实现 "local"（本地磁盘）。
+  # 后续接 OSS / S3 / 七牛时，只需在 internal/infra/upload/upload.go 的
+  # newDriver() 追加 case 并新增 driver/<name>.go。
+  driver: local
+
+  # 单文件大小上限。MaxSize 与 MaxSizeUnit 组合后转换为字节数。
+  # MaxSizeUnit ∈ {B, KB, MB, GB}，单位大小写不敏感。
+  max_size: 10
+  max_size_unit: MB
+
+  # 允许上传的文件后缀白名单（不带前导点、大小写不敏感）。
+  # 不在此列表的后缀会被 Service.Upload 直接拒绝（返回 ErrInvalidSuffix）。
+  suffixes:
+    - jpg
+    - jpeg
+    - png
+    - gif
+    - webp
+    - pdf
+
+  # 存储路径模板。支持以下占位符（按 strings.ReplaceAll 顺序替换）：
+  #   {topic}     - 业务侧传入的 topic 分类（如 "avatar" / "product"）
+  #   {year}      - 4 位年份（UTC）
+  #   {mon}       - 2 位月份（UTC）
+  #   {day}       - 2 位日期（UTC）
+  #   {fileName}  - sanitize 后的原始文件名（去掉非法字符、限制 ASCII/_-.）
+  #   {fileSha1}  - 文件内容 SHA1 的前 16 个 hex 字符（用于去重）
+  #   {.suffix}   - 小写后缀（含前导点，如 ".jpg"）
+  # 同一占位符可在模板里出现多次。
+  format: "/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}"
+
+  # 本地磁盘驱动专属配置（仅当 driver=local 时生效）。
+  local:
+    # 磁盘存储根目录。可为绝对路径，或相对项目根的相对路径。
+    # Save 时会以 base_dir 为根拼上渲染后的存储路径，FullPath 同理。
+    base_dir: storage/uploads
+
+    # 对外 HTTP 访问前缀（用于 Url() 输出）。部署侧需把该前缀反代到 base_dir。
+    url_prefix: /uploads

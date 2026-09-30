@@ -24,11 +24,28 @@ import (
 // Login 路径只触发 GetByUsername 与 Update；其余 CRUD 方法给 no-op 默认实现，
 // 保证编译期 adminRepo.Repository 接口满足（接口里其它方法也要在）。
 type mockRepo struct {
-	getByUsernameFunc func(c *gin.Context, username string) (*model.Admin, error)
-	updateFunc        func(c *gin.Context, entity *model.Admin) error
+	getByUsernameFunc    func(c *gin.Context, username string) (*model.Admin, error)
+	updateFunc           func(c *gin.Context, entity *model.Admin) error
+	getByIDFunc          func(c *gin.Context, id int64) (*model.Admin, error)
+	updatePasswordFunc   func(c *gin.Context, id uint, hashed string) error
+	updateStatusFunc     func(c *gin.Context, id uint, status int8) error
+	resetLoginFailureFunc func(c *gin.Context, id uint) error
+	deleteBatchFunc      func(c *gin.Context, ids []uint) error
 
-	updateCalls int
-	lastUpdate  *model.Admin
+	updateCalls    int
+	lastUpdate     *model.Admin
+	getByIDCalls   int
+	lastGetByID    int64
+	updatePwdCalls int
+	lastUpdatePwdID uint
+	lastUpdatePwdHash string
+	updateStatusCalls int
+	lastUpdateStatusID uint
+	lastUpdateStatus   int8
+	resetCalls    int
+	lastResetID   uint
+	deleteBatchCalls int
+	lastDeleteBatch []uint
 }
 
 func (m *mockRepo) GetByUsername(c *gin.Context, username string) (*model.Admin, error) {
@@ -52,8 +69,51 @@ func (m *mockRepo) Create(c *gin.Context, entity *model.Admin) error   { return 
 func (m *mockRepo) List(c *gin.Context, opts repository.ListOptions) ([]model.Admin, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockRepo) GetByID(c *gin.Context, id int64) (*model.Admin, error) { return nil, nil }
-func (m *mockRepo) Delete(c *gin.Context, id int64) error                  { return nil }
+func (m *mockRepo) GetByID(c *gin.Context, id int64) (*model.Admin, error) {
+	m.getByIDCalls++
+	m.lastGetByID = id
+	if m.getByIDFunc != nil {
+		return m.getByIDFunc(c, id)
+	}
+	return nil, nil
+}
+func (m *mockRepo) Delete(c *gin.Context, id int64) error { return nil }
+
+// 管理页 4 个新方法的 mock 实现。
+func (m *mockRepo) UpdatePassword(c *gin.Context, id uint, hashed string) error {
+	m.updatePwdCalls++
+	m.lastUpdatePwdID = id
+	m.lastUpdatePwdHash = hashed
+	if m.updatePasswordFunc != nil {
+		return m.updatePasswordFunc(c, id, hashed)
+	}
+	return nil
+}
+func (m *mockRepo) UpdateStatus(c *gin.Context, id uint, status int8) error {
+	m.updateStatusCalls++
+	m.lastUpdateStatusID = id
+	m.lastUpdateStatus = status
+	if m.updateStatusFunc != nil {
+		return m.updateStatusFunc(c, id, status)
+	}
+	return nil
+}
+func (m *mockRepo) ResetLoginFailure(c *gin.Context, id uint) error {
+	m.resetCalls++
+	m.lastResetID = id
+	if m.resetLoginFailureFunc != nil {
+		return m.resetLoginFailureFunc(c, id)
+	}
+	return nil
+}
+func (m *mockRepo) DeleteBatch(c *gin.Context, ids []uint) error {
+	m.deleteBatchCalls++
+	m.lastDeleteBatch = ids
+	if m.deleteBatchFunc != nil {
+		return m.deleteBatchFunc(c, ids)
+	}
+	return nil
+}
 
 // 编译期断言：mockRepo 必须实现 adminRepo.Repository。
 var _ adminRepo.Repository = (*mockRepo)(nil)

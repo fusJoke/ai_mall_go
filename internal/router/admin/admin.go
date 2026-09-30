@@ -15,6 +15,7 @@ import (
 	"ai-go-mall/internal/handler/admin"
 	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/infra/token"
+	"ai-go-mall/internal/infra/upload"
 	"ai-go-mall/internal/middleware"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/router/registry"
@@ -35,6 +36,7 @@ var (
 	adminSvcInstance     adminService.Service
 	adminHandlerInst     *admin.Handler
 	adminInitHandlerInst *admin.InitHandler
+	uploadHandlerInst    *admin.UploadHandler
 )
 
 func ensureDeps() {
@@ -49,6 +51,9 @@ func ensureDeps() {
 		// adminInitHandlerInst 同样需要 token infra 写入初始化过的 *gorm.DB；
 		// InitService 内部用 database.Get() 拿 db，复用同一 sync.Once 时机。
 		adminInitHandlerInst = admin.NewInitHandler(adminService.NewInitServiceDefault())
+		// uploadHandlerInst 需要 upload.Get() 在 cmd/serve 启动期已完成 Init()；
+		// admin 路由是首次请求时懒装配，到那时 upload 一定已就绪。
+		uploadHandlerInst = admin.NewUploadHandler(upload.Get())
 	})
 }
 
@@ -79,4 +84,15 @@ func init() {
 		ensureDeps()
 		adminInitHandlerInst.Init(c)
 	}, middleware.AdminAuth())
+
+	// POST /admin/ajax/upload —— 文件上传入口。
+	// 挂 AdminAuth 中间件，要求合法 admin token；multipart form 上 file 字段 + ?topic=xxx 分类。
+	registry.Register("/admin", http.MethodPost, "/ajax/upload", func(c *gin.Context) {
+		ensureDeps()
+		uploadHandlerInst.Upload(c)
+	}, middleware.AdminAuth())
+
+	// admin 管理页 9 条路由（5 通用 CRUD + 4 专属），全部挂 AdminAuth。
+	// 拆到 manager.go 是为了本文件聚焦"基础设施"主线（login / logout / init / upload / ping）。
+	registerManagerRoutes()
 }

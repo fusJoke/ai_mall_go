@@ -8,13 +8,18 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/handler"
+	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/model"
+	"ai-go-mall/internal/repository"
 	adminSvc "ai-go-mall/internal/service/admin"
 )
 
@@ -208,7 +213,79 @@ func extractBearerToken(authz string) string {
 	return strings.TrimSpace(authz[len(bearerLogoutPrefix):])
 }
 
+// --- 内联 helper：与 internal/handler/base.go 同名但保持私有 ---
+//
+// 把 BaseHandler 的解析逻辑内联在本文件，避免把私有 helper 升级成 export 形式
+// 污染 handler 包公共 API；admin 包只需要这三种解析，与 BaseHandler 重复定义的成本可忽略。
+
+// parseID 优先从 query (?id=) 取，其次从 postForm (id=)；都拿不到 / 非法 → 报错。
+func parseID(c *gin.Context) (int64, error) {
+	raw := c.Query("id")
+	if raw == "" {
+		raw = c.PostForm("id")
+	}
+	if raw == "" {
+		return 0, errors.New("missing id")
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, errors.New("invalid id")
+	}
+	return id, nil
+}
+
+// parseListOptions 从 query 取 page / page_size，写好默认值与上限。
+func parseListOptions(c *gin.Context) repository.ListOptions {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return repository.ListOptions{Page: page, PageSize: pageSize}
+}
+
+// requireNonZeroID 通过反射校验 entity 的 ID 字段非零。
+// 与 internal/handler/base.go 同实现；只用于 admin EditPost 路径。
+func requireNonZeroID(entity any) error {
+	v := reflect.ValueOf(entity)
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return errors.New("edit: nil entity")
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return errors.New("edit: entity must be a struct")
+	}
+	idField := v.FieldByName("ID")
+	if !idField.IsValid() {
+		return errors.New("edit: entity has no ID field")
+	}
+	switch idField.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if idField.Int() == 0 {
+			return errors.New("edit: missing or zero id")
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if idField.Uint() == 0 {
+			return errors.New("edit: missing or zero id")
+		}
+	default:
+		return errors.New("edit: ID field must be an integer")
+	}
+	return nil
+}
+
 // toAdminInfo 把 *model.Admin 投影到不含敏感字段的 adminInfo。
+//
+// 当前不存在 Password 字段，结构体层面已"省略"；本函数的存在意义是显式表达
+// "handler 不应把 model.Admin 原样序列化出去"的契约。
 func toAdminInfo(adm *model.Admin) adminInfo {
 	info := adminInfo{
 		ID:          adm.ID,
@@ -225,4 +302,401 @@ func toAdminInfo(adm *model.Admin) adminInfo {
 		info.LastLoginAt = adm.LastLoginAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 	return info
+}
+
+// toAdminInfoSlice 批量投影；用于 List 接口的 items。
+func toAdminInfoSlice(items []model.Admin) []adminInfo {
+	out := make([]adminInfo, len(items))
+	for i := range items {
+		out[i] = toAdminInfo(&items[i])
+	}
+	return out
+}
+
+// --- 管理页 CRUD 覆盖：去除 password 字段 + Delete 自保护 ---
+//
+// BaseHandler 默认把 *model.Admin 原样 JSON 出去（含 Password 字段）；
+// admin 管理页的 spec "Passwords are never exposed" 要求每个 HTTP 响应都不含密码。
+// 下面的覆盖等同于「手动复制 BaseHandler 的同名方法，但出口走 adminInfo」。
+
+// Create 覆盖 BaseHandler.Create：成功 → 200 + adminInfo（不含 password）。
+//
+// @Summary  创建管理员账号
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body model.Admin true "管理员字段（含 username / password 等）"
+// @Success  200 {object} admin.adminInfo     "create.ok"
+// @Failure  400 {object} map[string]string   "create.invalid_input / create.password_too_short"
+// @Failure  500 {object} map[string]string   "create.internal"
+// @Router   /admin/admin/create [post]
+func (h *Handler) Create(c *gin.Context) {
+	var entity model.Admin
+	if err := c.ShouldBindJSON(&entity); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "admin.create.invalid_input", "message": err.Error()})
+		return
+	}
+	if err := h.svc.Create(c, &entity); err != nil {
+		if errors.Is(err, adminSvc.ErrPasswordTooShort) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "admin.create.password_too_short",
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.create.internal",
+			"message": "create failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, toAdminInfo(&entity))
+}
+
+// List 覆盖 BaseHandler.List：items 走 adminInfo，不含 password。
+//
+// @Summary  管理员列表（搜索 + 分页）
+// @Tags     admin
+// @Produce  json
+// @Security BearerAuth
+// @Param    page      query int    false "页码（默认 1）"
+// @Param    page_size query int    false "每页条数（默认 20，上限 200）"
+// @Success  200 {object} map[string]any "list.ok"
+// @Failure  500 {object} map[string]string "list.internal"
+// @Router   /admin/admin/list [get]
+func (h *Handler) List(c *gin.Context) {
+	opts := parseListOptions(c)
+	items, total, err := h.svc.List(c, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.list.internal",
+			"message": "list failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"items":     toAdminInfoSlice(items),
+		"total":     total,
+		"page":      opts.Page,
+		"page_size": opts.PageSize,
+	})
+}
+
+// EditGet 覆盖 BaseHandler.EditGet：单行转 adminInfo。
+//
+// @Summary  取待编辑管理员行
+// @Tags     admin
+// @Produce  json
+// @Security BearerAuth
+// @Param    id query int true "管理员 ID"
+// @Success  200 {object} admin.adminInfo  "edit.ok"
+// @Failure  400 {object} map[string]string "edit.invalid_input"
+// @Failure  404 {object} map[string]string "edit.not_found"
+// @Failure  500 {object} map[string]string "edit.internal"
+// @Router   /admin/admin/edit [get]
+func (h *Handler) EditGet(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "admin.edit.invalid_input", "message": err.Error()})
+		return
+	}
+	entity, err := h.svc.GetByID(c, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    "admin.edit.not_found",
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.edit.internal",
+			"message": "get failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, toAdminInfo(entity))
+}
+
+// EditPost 覆盖 BaseHandler.EditPost：成功 → 200 + adminInfo。
+//
+// @Summary  提交修改管理员
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body model.Admin true "管理员字段（必须含 id；password 空表示不改）"
+// @Success  200 {object} admin.adminInfo      "edit.ok"
+// @Failure  400 {object} map[string]string    "edit.invalid_input / edit.password_too_short"
+// @Failure  500 {object} map[string]string    "edit.internal"
+// @Router   /admin/admin/edit [post]
+func (h *Handler) EditPost(c *gin.Context) {
+	var patch model.Admin
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "admin.edit.invalid_input", "message": err.Error()})
+		return
+	}
+	if err := requireNonZeroID(&patch); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "admin.edit.invalid_input", "message": err.Error()})
+		return
+	}
+	// 先读原行：避免 client JSON 把 CreatedAt=0000-00-00 / UpdatedAt=zero 等时间戳字段全量回写
+	// 触发 "Incorrect datetime value" 错误；也防止覆盖 Password / LastLoginAt 等不该由
+	// 编辑接口改的字段（service.Update 会基于 password 字段是否非空决定是否重哈希）。
+	entity, err := h.svc.GetByID(c, patch.ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "admin.edit.not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "admin.edit.internal", "message": "get failed"})
+		return
+	}
+	// 把 patch 里的业务字段选择性覆盖到 entity。
+	// Username 在编辑时不可变（避免唯一索引漂移），即使 client 传了也忽略。
+	patch.Username = ""
+	entity.Nickname = patch.Nickname
+	entity.Avatar = patch.Avatar
+	entity.Email = patch.Email
+	entity.Mobile = patch.Mobile
+	entity.Bio = patch.Bio
+	entity.Status = patch.Status
+	if patch.Password != "" {
+		entity.Password = patch.Password
+	}
+	if err := h.svc.Update(c, entity); err != nil {
+		if errors.Is(err, adminSvc.ErrPasswordTooShort) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "admin.edit.password_too_short",
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.edit.internal",
+			"message": "edit failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, toAdminInfo(entity))
+}
+
+// Delete 覆盖 BaseHandler.Delete：self-protection。
+//
+// spec 场景「Delete self → 403 admin.delete.self_protection」要求 admin
+// 不能通过 /admin/admin/delete 删除自己；自保护判断放到 service 层会导致
+// Delete 操作无法使用 CRUDRepository 的现成 Delete 路径（service 拿不到 self），
+// 因此这里在 handler 入口拦截。
+//
+// @Summary  删除管理员账号（self-protection）
+// @Tags     admin
+// @Security BearerAuth
+// @Param    id query int true "管理员 ID"
+// @Success  200 {object} map[string]any      "delete.ok"
+// @Failure  400 {object} map[string]string   "delete.invalid_input"
+// @Failure  403 {object} map[string]string   "delete.self_protection"
+// @Failure  500 {object} map[string]string   "delete.internal"
+// @Router   /admin/admin/delete [post]
+func (h *Handler) Delete(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "admin.delete.invalid_input", "message": err.Error()})
+		return
+	}
+	if self := middleware.AdminFromContext(c); self != nil && uint(self.ID) == uint(id) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    "admin.delete.self_protection",
+			"message": "cannot delete current admin",
+		})
+		return
+	}
+	if err := h.svc.Delete(c, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.delete.internal",
+			"message": "delete failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// --- 管理页 4 个专属方法 ---
+
+// changePasswordRequest 是 POST /admin/admin/change-password 的请求体。
+type changePasswordRequest struct {
+	ID          uint   `json:"id" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// ChangePassword 处理 POST /admin/admin/change-password。
+//
+// 错误映射：ErrPasswordTooShort → 400 admin.change_password.password_too_short；
+// 其他 → 500 admin.change_password.internal。
+//
+// @Summary  重置指定管理员的密码（强制吊销其全部 token）
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body admin.changePasswordRequest true "管理员 ID + 新密码"
+// @Success  200 {object} map[string]string "change_password.ok"
+// @Failure  400 {object} map[string]string "change_password.invalid_input / change_password.password_too_short"
+// @Failure  500 {object} map[string]string "change_password.internal"
+// @Router   /admin/admin/change-password [post]
+func (h *Handler) ChangePassword(c *gin.Context) {
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "admin.change_password.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := h.svc.ChangePassword(c, req.ID, req.NewPassword); err != nil {
+		if errors.Is(err, adminSvc.ErrPasswordTooShort) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "admin.change_password.password_too_short",
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.change_password.internal",
+			"message": "change password failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "admin.change_password.ok", "message": "ok"})
+}
+
+// toggleStatusRequest 是 POST /admin/admin/toggle-status 的请求体。
+type toggleStatusRequest struct {
+	ID uint `json:"id" binding:"required"`
+}
+
+// ToggleStatus 处理 POST /admin/admin/toggle-status。
+//
+// 错误映射：ErrSelfProtection → 403；gorm.ErrRecordNotFound → 404；其他 → 500。
+//
+// @Summary  切换管理员状态（启用 ↔ 禁用；1→0 吊销 token）
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body admin.toggleStatusRequest true "管理员 ID"
+// @Success  200 {object} map[string]string "toggle_status.ok"
+// @Failure  400 {object} map[string]string "toggle_status.invalid_input"
+// @Failure  403 {object} map[string]string "toggle_status.self_protection"
+// @Failure  404 {object} map[string]string "toggle_status.not_found"
+// @Failure  500 {object} map[string]string "toggle_status.internal"
+// @Router   /admin/admin/toggle-status [post]
+func (h *Handler) ToggleStatus(c *gin.Context) {
+	var req toggleStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "admin.toggle_status.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := h.svc.ToggleStatus(c, req.ID); err != nil {
+		switch {
+		case errors.Is(err, adminSvc.ErrSelfProtection):
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    "admin.toggle_status.self_protection",
+				"message": err.Error(),
+			})
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    "admin.toggle_status.not_found",
+				"message": err.Error(),
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    "admin.toggle_status.internal",
+				"message": "toggle status failed",
+			})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "admin.toggle_status.ok", "message": "ok"})
+}
+
+// unlockRequest 是 POST /admin/admin/unlock 的请求体。
+type unlockRequest struct {
+	ID uint `json:"id" binding:"required"`
+}
+
+// Unlock 处理 POST /admin/admin/unlock。
+//
+// @Summary  解锁管理员（重置 LoginFailure=0 + Status=1）
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body admin.unlockRequest true "管理员 ID"
+// @Success  200 {object} map[string]string "unlock.ok"
+// @Failure  400 {object} map[string]string "unlock.invalid_input"
+// @Failure  500 {object} map[string]string "unlock.internal"
+// @Router   /admin/admin/unlock [post]
+func (h *Handler) Unlock(c *gin.Context) {
+	var req unlockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "admin.unlock.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := h.svc.Unlock(c, req.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.unlock.internal",
+			"message": "unlock failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "admin.unlock.ok", "message": "ok"})
+}
+
+// batchDeleteRequest 是 POST /admin/admin/batch-delete 的请求体。
+type batchDeleteRequest struct {
+	IDs []uint `json:"ids"`
+}
+
+// BatchDelete 处理 POST /admin/admin/batch-delete。
+//
+// 空 ids / 全是 self → 仍返 200 + {deleted:0, skipped_self:n}（service 已处理）。
+//
+// @Summary  批量删除管理员（自动剔除 self）
+// @Tags     admin
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    req body admin.batchDeleteRequest true "管理员 ID 列表"
+// @Success  200 {object} map[string]int "batch_delete.ok"
+// @Failure  400 {object} map[string]string "batch_delete.invalid_input"
+// @Failure  500 {object} map[string]string "batch_delete.internal"
+// @Router   /admin/admin/batch-delete [post]
+func (h *Handler) BatchDelete(c *gin.Context) {
+	var req batchDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "admin.batch_delete.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	deleted, skippedSelf, err := h.svc.BatchDelete(c, req.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    "admin.batch_delete.internal",
+			"message": "batch delete failed",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"deleted":       deleted,
+		"skipped_self": skippedSelf,
+	})
 }

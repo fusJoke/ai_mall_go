@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/model"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	captchaInfra "ai-go-mall/internal/infra/captcha"
@@ -80,6 +81,23 @@ var (
 	ErrInvalidCaptcha     = errors.New("admin: invalid captcha")
 )
 
+// 管理页专用错误。
+//
+// handler 把 ErrPasswordTooShort 映射成 4xx admin.change_password.password_too_short
+// 把 ErrSelfProtection 映射成 403 admin.toggle_status.self_protection。
+var (
+	ErrPasswordTooShort = errors.New("admin: password too short")
+	ErrSelfProtection   = errors.New("admin: refusing self-targeting operation")
+)
+
+// 密码 / 用户名长度下限常量。
+//
+// 故意不在配置层暴露：管理页是内部工具，最小校验就够；如要外部化请先讨论配置结构。
+const (
+	MinPasswordLength = 8
+	MinUsernameLength = 3
+)
+
 // Service 是管理员实体的业务接口。
 //
 // 调用方（handler / 业务编排）只持有接口；具体实现由 NewService 返回。
@@ -101,6 +119,24 @@ type Service interface {
 	// Logout 软删除当前调用方持有的 token；幂等 —— token 缺失 / 已过期 / 不存在一律返回 nil。
 	// 由 tokenIssuer.Delete 保证幂等性，service 层不做额外包装。
 	Logout(ctx context.Context, rawToken string) error
+
+	// ChangePassword 改密：bcrypt 哈希后写库；成功后吊销该 admin 全部 admin token。
+	// newPassword 长度 < MinPasswordLength → ErrPasswordTooShort；repo 错误原样返回。
+	// token 吊销失败仅 log warn，不阻塞主流程。
+	ChangePassword(c *gin.Context, id uint, newPassword string) error
+
+	// ToggleStatus 切换 Status：1→0 时调 tm.Clear 吊销该 admin token；0→1 不吊销。
+	// self-protection：目标 id == 当前 admin.ID → ErrSelfProtection（admin 不能禁用自己的账号）。
+	// 不存在 → gorm.ErrRecordNotFound。
+	ToggleStatus(c *gin.Context, id uint) error
+
+	// Unlock 重置 LoginFailure=0 + Status=1；不解锁密码、不吊销 token
+	// （admin 解锁是「让用户继续登录」，不是「逼他下线」，与 buildadmin 行为一致）。
+	Unlock(c *gin.Context, id uint) error
+
+	// BatchDelete 软删一组 id；调用前剔除 self-id，返回 (deleted, skippedSelf, err)。
+	// 空 ids → (0, 0, nil)；只剩 self → (0, len(ids), nil)；repo 错透传。
+	BatchDelete(c *gin.Context, ids []uint) (deleted int, skippedSelf int, err error)
 }
 
 // baseService 是 Service 的默认实现。
@@ -202,6 +238,148 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 // Logout 实现见 Service 注释。直接转发到 tokenIssuer.Delete —— 幂等性由 token infra 保证。
 func (s *baseService) Logout(ctx context.Context, rawToken string) error {
 	return s.tm.Delete(ctx, rawToken)
+}
+
+// --- 管理页专属方法 ---
+
+// Create 在转发到嵌入 CRUDService.Create 之前做密码哈希。
+//
+// admin 业务规则：Password 字段进入 service 必须已被调用方填上明文；空值视作编程错误，
+// 由 nil 检查 + ErrPasswordTooShort 兜底。用户名查重由 GORM 唯一索引兜底，
+// 不在 service 层重复 GetByUsername。
+func (s *baseService) Create(c *gin.Context, entity *model.Admin) error {
+	if entity == nil {
+		return errors.New("service: nil entity")
+	}
+	if err := s.hashPasswordIfNeeded(c, entity, false); err != nil {
+		return err
+	}
+	return s.CRUDService.Create(c, entity)
+}
+
+// Update 在转发到嵌入 CRUDService.Update 之前按"非空则改密"语义处理 Password 字段。
+//
+// 前端部分更新：省略 password 字段 → entity.Password == "" → 不动原密码；
+// 显式给新密码 → 走 bcrypt。
+func (s *baseService) Update(c *gin.Context, entity *model.Admin) error {
+	if entity == nil {
+		return errors.New("service: nil entity")
+	}
+	if err := s.hashPasswordIfNeeded(c, entity, true); err != nil {
+		return err
+	}
+	return s.CRUDService.Update(c, entity)
+}
+
+// hashPasswordIfNeeded 按 Update/Create 语义处理 Password：
+//
+//   - isUpdate=true && Password == "" → 直接 return nil，保留 DB 原值；
+//   - 其他情况 → 长度校验 < MinPasswordLength 返 ErrPasswordTooShort；
+//     bcrypt.DefaultCost 哈希后回写 entity.Password。
+//
+// 故意不读 DB 当前值再合并：service 层语义是"前端给什么就存什么"，空 password 在
+// Update 路径下语义明确 = "不改"；Create 路径下空 password 等同"漏字段"，应报错。
+func (s *baseService) hashPasswordIfNeeded(_ *gin.Context, entity *model.Admin, isUpdate bool) error {
+	if isUpdate && entity.Password == "" {
+		return nil
+	}
+	if len(entity.Password) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(entity.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	entity.Password = string(hashed)
+	return nil
+}
+
+// ChangePassword 见 Service 接口。
+//
+// 流程：长度校验 → bcrypt → repo.UpdatePassword → tm.Clear（失败 log warn 不阻塞）。
+func (s *baseService) ChangePassword(c *gin.Context, id uint, newPassword string) error {
+	if len(newPassword) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.UpdatePassword(c, id, string(hashed)); err != nil {
+		return err
+	}
+	// 改密后强制吊销该 admin 全部 admin token，让用户用新密码重新登录。
+	if err := s.tm.Clear(c.Request.Context(), int64(id), tokenTypeAdmin); err != nil {
+		// 防御动作：吊销失败不阻塞「密码已改」这个事实。
+		// 生产环境可考虑接 zap / logrus 写 warn 日志；service 包当前没有 logger 依赖。
+		_ = err
+	}
+	return nil
+}
+
+// ToggleStatus 见 Service 接口。
+//
+// self-protection：当前 admin 不能禁用自己的账号（防止 super admin 把所有 admin 一起锁掉）。
+//
+// 1→0 切到禁用时同步吊销该 admin 的 token；0→1 不吊销（admin 解禁用户是为了让 ta 继续用）。
+func (s *baseService) ToggleStatus(c *gin.Context, id uint) error {
+	if self := middleware.AdminFromContext(c); self != nil && uint(self.ID) == id {
+		return ErrSelfProtection
+	}
+	adm, err := s.repo.GetByID(c, int64(id))
+	if err != nil {
+		return err
+	}
+	if adm == nil {
+		return gorm.ErrRecordNotFound
+	}
+
+	var newStatus int8
+	if adm.Status == 1 {
+		newStatus = 0
+	} else {
+		newStatus = 1
+	}
+	if err := s.repo.UpdateStatus(c, id, newStatus); err != nil {
+		return err
+	}
+	// 1→0 才吊销 token；0→1 不动。
+	if adm.Status == 1 {
+		if err := s.tm.Clear(c.Request.Context(), int64(id), tokenTypeAdmin); err != nil {
+			_ = err
+		}
+	}
+	return nil
+}
+
+// Unlock 见 Service 接口。直接调 repo.ResetLoginFailure —— 一行的事，不读 self / 不清 token。
+func (s *baseService) Unlock(c *gin.Context, id uint) error {
+	return s.repo.ResetLoginFailure(c, id)
+}
+
+// BatchDelete 见 Service 接口。
+//
+// 流程：剔除 self-id → 调 repo.DeleteBatch（空切片短路）→ 返回计数。
+// 不开事务：删除是幂等的，软删即便重复执行也只动 deleted_at。
+func (s *baseService) BatchDelete(c *gin.Context, ids []uint) (int, int, error) {
+	self := middleware.AdminFromContext(c)
+
+	filtered := make([]uint, 0, len(ids))
+	var skippedSelf int
+	for _, id := range ids {
+		if self != nil && id == uint(self.ID) {
+			skippedSelf++
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	if len(filtered) == 0 {
+		return 0, skippedSelf, nil
+	}
+	if err := s.repo.DeleteBatch(c, filtered); err != nil {
+		return 0, skippedSelf, err
+	}
+	return len(filtered), skippedSelf, nil
 }
 
 // 编译期断言：baseService 必须实现 Service。

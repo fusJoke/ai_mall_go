@@ -149,6 +149,7 @@ type Config struct {
 	Token    TokenConfig    `mapstructure:"token"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	Captcha  CaptchaConfig  `mapstructure:"captcha"`
+	Upload   UploadConfig   `mapstructure:"upload"`
 }
 
 // TokenConfig token 存储配置。
@@ -182,6 +183,27 @@ type CaptchaConfig struct {
 	FontPath string `mapstructure:"字体路径"`
 }
 
+// UploadConfig 文件上传配置。
+//
+// 通过 driver 名字切换不同存储后端实现；当前仅实现 local 磁盘驱动。
+// 详见 internal/infra/upload。
+type UploadConfig struct {
+	Driver      string            `mapstructure:"driver"`
+	MaxSize     int64             `mapstructure:"max_size"`
+	MaxSizeUnit string            `mapstructure:"max_size_unit"`
+	Suffixes    []string          `mapstructure:"suffixes"`
+	Format      string            `mapstructure:"format"`
+	Local       UploadLocalConfig `mapstructure:"local"`
+}
+
+// UploadLocalConfig 本地磁盘驱动专属配置。
+//
+// 仅当 UploadConfig.Driver == "local" 时生效。
+type UploadLocalConfig struct {
+	BaseDir   string `mapstructure:"base_dir"`
+	URLPrefix string `mapstructure:"url_prefix"`
+}
+
 // CORSConfig 跨域配置。
 //
 // 当前仅暴露 allow_origins；方法 / 请求头 / 预检缓存时间 / Credentials
@@ -201,6 +223,15 @@ type ServerConfig struct {
 	Name string `mapstructure:"name"`
 	Port int    `mapstructure:"port"`
 	Mode string `mapstructure:"mode"`
+
+	// CDNURL 是资源 CDN 域名（末尾不带 `/`）。
+	// 缺省 / 空串 → 视为关闭 CDN，FullURL / fullURL 走当前请求域名。
+	// 详见 internal/kit/urlx.FullURL。
+	CDNURL string `mapstructure:"cdn_url"`
+
+	// CDNURLParams 是拼在 CDN 域名后的固定子路径（如 `format/heif`）。
+	// 缺省 / 空串 → 仅拼 CDN 域名。
+	CDNURLParams string `mapstructure:"cdn_url_params"`
 }
 
 // DatabaseConfig 数据库配置。Type 与 Prefix 对写库与读库共享。
@@ -249,4 +280,29 @@ func (c *Config) applyDefaults() {
 	}
 	// CaptchaConfig 不做兜底：所有字段必须由 captcha.yaml 显式提供。
 	// 缺失字段由使用方（infra/captcha）做语义级校验并返回 ErrInvalidInput。
+
+	// Upload 默认值：所有 upload 字段均允许缺省，缺省走代码内置的合理默认值
+	// （10MB / 6 个常见后缀 / 默认 format 模板 / local storage/uploads 目录）。
+	// 这样 config/upload.yaml 即使缺失文件也能启动（spec ADDED Requirement 1）。
+	if c.Upload.Driver == "" {
+		c.Upload.Driver = "local"
+	}
+	if c.Upload.MaxSize == 0 {
+		c.Upload.MaxSize = 10
+	}
+	if c.Upload.MaxSizeUnit == "" {
+		c.Upload.MaxSizeUnit = "MB"
+	}
+	if len(c.Upload.Suffixes) == 0 {
+		c.Upload.Suffixes = []string{"jpg", "jpeg", "png", "gif", "webp", "pdf"}
+	}
+	if c.Upload.Format == "" {
+		c.Upload.Format = "/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}"
+	}
+	if c.Upload.Local.BaseDir == "" {
+		c.Upload.Local.BaseDir = "storage/uploads"
+	}
+	if c.Upload.Local.URLPrefix == "" {
+		c.Upload.Local.URLPrefix = "/uploads"
+	}
 }
