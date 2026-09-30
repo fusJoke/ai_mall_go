@@ -31,9 +31,10 @@ var adminRepoInstance = adminRepo.NewRepository()
 //
 // 用 sync.Once 锁住首调装配，保证并发安全 + 只装配一次。
 var (
-	serviceOnce      sync.Once
-	adminSvcInstance adminService.Service
-	adminHandlerInst *admin.Handler
+	serviceOnce          sync.Once
+	adminSvcInstance     adminService.Service
+	adminHandlerInst     *admin.Handler
+	adminInitHandlerInst *admin.InitHandler
 )
 
 func ensureDeps() {
@@ -45,6 +46,9 @@ func ensureDeps() {
 		}
 		adminSvcInstance = adminService.NewService(adminRepoInstance, token.Get(), mgr)
 		adminHandlerInst = admin.NewHandler(adminSvcInstance)
+		// adminInitHandlerInst 同样需要 token infra 写入初始化过的 *gorm.DB；
+		// InitService 内部用 database.Get() 拿 db，复用同一 sync.Once 时机。
+		adminInitHandlerInst = admin.NewInitHandler(adminService.NewInitServiceDefault())
 	})
 }
 
@@ -68,4 +72,11 @@ func init() {
 		ensureDeps()
 		adminHandlerInst.Logout(c)
 	})
+
+	// GET /admin/init —— 后台初始化。挂 AdminAuth 中间件，要求合法 admin token；
+	// handler 从 context 读 admin + 调 InitService 聚合响应。
+	registry.Register("/admin", http.MethodGet, "/init", func(c *gin.Context) {
+		ensureDeps()
+		adminInitHandlerInst.Init(c)
+	}, middleware.AdminAuth())
 }

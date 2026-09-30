@@ -146,3 +146,54 @@ export interface Menu {
     children: RouteRecordRaw[]
     authNode: Map<string, string[]>
 }
+
+/**
+ * 站点基础配置 —— 与后端 `GET /admin/init` 响应里的 `site_config` 字段对齐。
+ *
+ * 字段名严格 snake_case 以匹配后端 JSON tag；缺失配置对应空字符串而非 undefined。
+ */
+export interface SiteConfig {
+    name: string
+    record_number: string
+    version: string
+}
+
+/**
+ * 菜单规则 —— 与后端 `internal/model/admin.go` 的 `AdminRule` 对齐，
+ * 仅列出 init 响应会用到的字段。
+ *
+ * - `type` 后端返回字符串（dir/menu/node），前端按值路由：
+ *   - `dir`：规则目录，作为菜单分组，不注册为路由
+ *   - `menu`：菜单项，注册为路由
+ *   - `node`：纯权限节点，仅展示，不注册为路由
+ * - `open_type` 可空 —— 后端 nil 不写字段。
+ */
+export interface MenuRule {
+    id: number
+    pid: number
+    type: 'dir' | 'menu' | 'node'
+    title: string
+    name: string
+    path: string
+    icon: string
+    open_type?: 'tab' | 'link' | 'iframe'
+    url: string
+    component: string
+    keepalive: boolean
+    extend: string
+    weigh: number
+}
+
+/**
+ * 后台初始化响应 —— 与后端 `internal/service/admin/init.go` 的 InitResponse 对齐。
+ *
+ * 字段含义：
+ *   - `admin`：当前登录管理员基本信息 + 是否超管（决定前端 UI 是否展示超管按钮）
+ *   - `site_config`：站点基础配置三项（site name / record number / version）
+ *   - `menus`：当前管理员持有的菜单规则全集（含 dir / menu / node 三种类型）
+ */
+export interface InitResponse {
+    admin: AdminInfo
+    site_config: SiteConfig
+    menus: MenuRule[]
+}

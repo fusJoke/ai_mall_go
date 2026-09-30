@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 import { STORE_CONFIG } from '/@/stores/constant/cacheKey'
-import type { Crud, Lang, Layout } from '/@/stores/interface'
+import type { Crud, Lang, Layout, SiteConfig } from '/@/stores/interface'
 import { useNavTabs } from '/@/stores/navTabs'
 
 export const useConfig = defineStore(
@@ -134,7 +134,31 @@ export const useConfig = defineStore(
             ;(crud[name] as any) = value
         }
 
-        return { layout, lang, crud, menuWidth, setLang, setLayoutMode, setLayout, getColorVal, setCrud }
+        // 站点基础配置（来自后端 `GET /admin/init` 响应 site_config 字段）。
+        // 用 reactive 包裹便于单独 watch；调用方通过 setSiteConfig 覆盖。
+        const siteConfig = reactive<SiteConfig>({
+            name: '',
+            record_number: '',
+            version: '',
+        })
+
+        const setSiteConfig = (data: Partial<SiteConfig>) => {
+            Object.assign(siteConfig, data)
+        }
+
+        return {
+            layout,
+            lang,
+            crud,
+            siteConfig,
+            menuWidth,
+            setLang,
+            setLayoutMode,
+            setLayout,
+            getColorVal,
+            setCrud,
+            setSiteConfig,
+        }
     },
     {
         persist: {

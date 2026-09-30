@@ -8,8 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ai-go-mall/internal/infra/database"
 	"ai-go-mall/internal/infra/token"
 	"ai-go-mall/internal/model"
+	adminRepo "ai-go-mall/internal/repository/admin"
 )
 
 // checkToken 是 AdminAuth 实际调用的 token 校验入口。
@@ -29,9 +31,47 @@ var checkToken = func(ctx context.Context, rawToken string) (*model.Token, error
 	return mgr.Check(ctx, rawToken)
 }
 
+// lookupAdmin 是 AdminAuth 在 token 校验通过后执行的 admin 实体查询入口。
+//
+// 生产实现：从 database.Get() 拿 GORM 实例，调 AdminRepository.GetByID；
+// 测试可整体替换为 fake（auth_test.go）。
+//
+// 行为约定：
+//   - database.Get() 未初始化（测试场景）：返回 (nil, nil)，不 panic；
+//   - admin 不存在 / 已软删：返回 (nil, nil)；
+//   - DB 错误：返回 (nil, err)。
+//
+// 中间件拿到 (nil, err) 时映射成 500 auth.internal；拿到 (nil, nil) 时
+// 不 abort（token 已合法，handler 自决），只把 nil 塞进 context。
+var lookupAdmin = func(uid uint) (*model.Admin, error) {
+	db := database.Get()
+	if db == nil {
+		return nil, nil
+	}
+	return adminRepo.NewAdminRepository(db).GetByID(uid)
+}
+
 // errTokenManagerUnavailable：token infra 未初始化时返回的哨兵；
 // 中间件把它映射成 500 auth.internal 而非 401。
 var errTokenManagerUnavailable = errors.New("token manager unavailable")
+
+// adminContextKey 是当前管理员记录挂在 gin context 上的键。
+//
+// handler 通过 AdminFromContext(c) 读取；值为 *model.Admin，可能为 nil。
+const adminContextKey = "admin.current"
+
+// AdminFromContext 返回当前请求上下文中由 AdminAuth 写入的管理员记录。
+//
+// 可能返回 nil —— 通常发生在：admin 被并发删除 / token 签发时 admin 存在、
+// 请求到达前已被删。调用方拿到 nil 时按业务自行处理（init handler 走 403）。
+func AdminFromContext(c *gin.Context) *model.Admin {
+	v, ok := c.Get(adminContextKey)
+	if !ok {
+		return nil
+	}
+	adm, _ := v.(*model.Admin)
+	return adm
+}
 
 // tokenTypeAdmin 是本中间件接受的 token 类型：仅允许 type == "admin" 的 token 通过。
 //
@@ -50,6 +90,11 @@ const tokenTypeAdmin = "admin"
 //   - 类型不符（非 tokenTypeAdmin）    → 401 auth.token_type_mismatch
 //   - 其他错误                          → 401 auth.invalid_token
 //   - token infra 未初始化             → 500 auth.internal（fail-closed）
+//
+// token 校验通过后调 lookupAdmin 拿当前 admin 写入 context，供 handler 复用：
+//   - DB 错误                           → 500 auth.internal
+//   - admin 不存在 / 已软删             → 不 abort，nil context，handler 自决
+//   - admin 存在                        → c.Set(adminContextKey, *model.Admin)
 //
 // 错误响应只回固定文案，不透传 err.Error() 给客户端 —— 防止「token: not found」
 // 等驱动层内部措辞泄露到用户面前。
@@ -87,6 +132,21 @@ func AdminAuth() gin.HandlerFunc {
 			return
 		}
 
+		// token 已合法 —— 把当前 admin 写入 context 供下游 handler 使用。
+		// tok.UserID 是 int64（model.Token），AdminRepository.GetByID 收 uint，
+		// 这里强转；实际系统中 admin.ID 始终为正，转 uint 不会失真。
+		adm, lookupErr := lookupAdmin(uint(tok.UserID))
+		if lookupErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"code":    "auth.internal",
+				"message": msgAuthInternal,
+			})
+			return
+		}
+		if adm != nil {
+			c.Set(adminContextKey, adm)
+		}
+
 		c.Next()
 	}
 }
@@ -96,13 +156,13 @@ const bearerPrefix = "Bearer "
 
 // 客户端可见的固定文案（不暴露驱动层细节、可本地化）。
 const (
-	msgMissingToken    = "missing or malformed Authorization header"
-	msgEmptyBearer     = "empty bearer token"
-	msgTokenNotFound   = "token not found"
-	msgTokenExpired    = "token expired"
-	msgTypeMismatch    = "token type not allowed for this endpoint"
-	msgInvalidToken    = "invalid token"
-	msgAuthInternal    = "auth subsystem unavailable"
+	msgMissingToken  = "missing or malformed Authorization header"
+	msgEmptyBearer   = "empty bearer token"
+	msgTokenNotFound = "token not found"
+	msgTokenExpired  = "token expired"
+	msgTypeMismatch  = "token type not allowed for this endpoint"
+	msgInvalidToken  = "invalid token"
+	msgAuthInternal  = "auth subsystem unavailable"
 )
 
 // classifyTokenErr 把 checkToken 返回的 error 映射成 (code, message)。

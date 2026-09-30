@@ -1,6 +1,11 @@
 import type { ClickRequest } from '/@/components/clickCaptcha/index'
 import request from '/@/utils/request'
-import type { LoginRequest, LoginResponse, LogoutResponse } from '/@/stores/interface'
+import type {
+    InitResponse,
+    LoginRequest,
+    LoginResponse,
+    LogoutResponse,
+} from '/@/stores/interface'
 
 /**
  * 获取点选验证码
@@ -65,6 +70,26 @@ export function logout() {
     return request.request<LogoutResponse>({
         url: '/admin/logout',
         method: 'POST',
+        __opts: { showErrorMessage: false },
+    })
+}
+
+/**
+ * 后台初始化 —— 登录后调一次，聚合当前管理员信息 / 站点配置 / 权限菜单。
+ *
+ * 失败处理由调用方（layouts/admin/index.vue 的 init 流程）决定 —— 这里用
+ * `showErrorMessage: false` 静默处理，把错误抛给调用方走专门的跳转逻辑：
+ *   - 401：清空 adminInfo 并跳 /admin/login
+ *   - 403：跳 /admin/login（admin 被禁用）
+ *   - 5xx：跳 /admin/login 并提示
+ *
+ * 后端实现见 internal/handler/admin/init.go Init；规格见
+ * openspec/changes/admin-init-endpoint/specs/admin-init/spec.md。
+ */
+export function init() {
+    return request.request<InitResponse>({
+        url: '/admin/init',
+        method: 'GET',
         __opts: { showErrorMessage: false },
     })
 }

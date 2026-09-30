@@ -22,6 +22,19 @@ func withCheckToken(t *testing.T, fn func(ctx context.Context, rawToken string) 
 	t.Cleanup(func() { checkToken = prev })
 }
 
+// withAdminLookup 在测试期间替换 lookupAdmin，结束时还原。nil 表示恢复默认
+// （database.Get() == nil 时返回 (nil, nil)，middleware 不 panic）。
+func withAdminLookup(t *testing.T, fn func(uid uint) (*model.Admin, error)) {
+	t.Helper()
+	prev := lookupAdmin
+	if fn == nil {
+		lookupAdmin = prev // no-op，便于子测试显式恢复
+	} else {
+		lookupAdmin = fn
+	}
+	t.Cleanup(func() { lookupAdmin = prev })
+}
+
 // newAuthTestEngine 拼一个最小 gin 引擎：AdminAuth + 一个「命中」handler，
 // 命中 handler 用 200 + {"reached": true} 标记「中间件放行」。
 func newAuthTestEngine() *gin.Engine {
@@ -311,3 +324,110 @@ var errGeneric = stringError("some unexpected failure")
 type stringError string
 
 func (e stringError) Error() string { return string(e) }
+
+// --- L3: token 合法 → admin 写入 context / lookupAdmin 错误映射 500 ---
+
+// newAuthTestEngineWithAdminEcho 在 newAuthTestEngine 基础上把 AdminFromContext
+// 拿到的 admin 写进响应体，方便测试断言 context 内容。
+func newAuthTestEngineWithAdminEcho() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/protected", AdminAuth(), func(c *gin.Context) {
+		adm := AdminFromContext(c)
+		if adm == nil {
+			c.JSON(http.StatusOK, gin.H{"reached": true, "admin_in_context": false})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"reached":          true,
+			"admin_in_context": true,
+			"admin_id":         adm.ID,
+			"admin_username":   adm.Username,
+		})
+	})
+	return r
+}
+
+func TestAdminAuth_SetsAdminInContext_OnValidLookup(t *testing.T) {
+	r := newAuthTestEngineWithAdminEcho()
+	withCheckToken(t, func(ctx context.Context, rawToken string) (*model.Token, error) {
+		return &model.Token{UserID: 42, Type: "admin"}, nil
+	})
+	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+		if uid != 42 {
+			t.Errorf("lookupAdmin got uid = %d, want 42", uid)
+		}
+		return &model.Admin{ID: 42, Username: "alice", Status: 1}, nil
+	})
+
+	code, body := runReq(t, r, "GET", "/protected", "Bearer valid-token")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if body["admin_in_context"] != true {
+		t.Errorf("admin_in_context = %v, want true", body["admin_in_context"])
+	}
+	if body["admin_id"] != float64(42) {
+		t.Errorf("admin_id = %v, want 42", body["admin_id"])
+	}
+	if body["admin_username"] != "alice" {
+		t.Errorf("admin_username = %v, want alice", body["admin_username"])
+	}
+}
+
+func TestAdminAuth_AdminNotFound_PassesThroughNilContext(t *testing.T) {
+	// admin 已被删除 / 软删 → lookupAdmin 返回 (nil, nil) → 中间件放行 + context 无 admin。
+	r := newAuthTestEngineWithAdminEcho()
+	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
+		return &model.Token{UserID: 999, Type: "admin"}, nil
+	})
+	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+		return nil, nil
+	})
+
+	code, body := runReq(t, r, "GET", "/protected", "Bearer valid-token")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (token 合法，admin 缺失不应 401)", code)
+	}
+	if body["admin_in_context"] != false {
+		t.Errorf("admin_in_context = %v, want false", body["admin_in_context"])
+	}
+}
+
+func TestAdminAuth_LookupError_500(t *testing.T) {
+	r := newAuthTestEngine()
+	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
+		return &model.Token{UserID: 1, Type: "admin"}, nil
+	})
+	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+		return nil, stringError("db down")
+	})
+
+	code, body := runReq(t, r, "GET", "/protected", "Bearer valid-token")
+	if code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", code)
+	}
+	if body["code"] != "auth.internal" {
+		t.Errorf("body.code = %v, want auth.internal", body["code"])
+	}
+}
+
+func TestAdminAuth_InvalidToken_NoLookup(t *testing.T) {
+	// token 无效 / 类型不符 → 中间件不调 lookupAdmin；context 也无 admin。
+	r := newAuthTestEngineWithAdminEcho()
+	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
+		return &model.Token{UserID: 1, Type: "user"}, nil // 类型不符
+	})
+	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+		t.Fatalf("lookupAdmin should NOT be called when token type mismatches")
+		return nil, nil
+	})
+
+	code, body := runReq(t, r, "GET", "/protected", "Bearer valid-token")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", code)
+	}
+	if body["code"] != "auth.token_type_mismatch" {
+		t.Errorf("body.code = %v, want auth.token_type_mismatch", body["code"])
+	}
+}
