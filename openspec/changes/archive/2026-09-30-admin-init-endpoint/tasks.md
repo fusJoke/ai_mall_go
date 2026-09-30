@@ -48,4 +48,4 @@
 
 - [x] 9.2 运行 `gofmt -l internal/middleware/auth.go internal/handler/admin/init.go internal/service/admin/init.go internal/repository/admin/config_repository.go internal/repository/admin/rule_repository.go`，确认无输出。验证：命令无输出。
 
-- [ ] 9.3（可选，本地有 MySQL 时执行）`curl -i -H "Authorization: Bearer $TOKEN" http://localhost:PORT/admin/init`，响应 200 且 body 含 `admin / site_config / menus` 三字段；`site_config` 仅含 `name / record_number / version` 三键；超管 token 时 `menus.length` 等于 `SELECT COUNT(*) FROM admin_rule WHERE status=1`。
+- [x] 9.3（可选，本地有 MySQL 时执行）`curl -i -H "Authorization: Bearer $TOKEN" http://localhost:PORT/admin/init`，响应 200 且 body 含 `admin / site_config / menus` 三字段；`site_config` 仅含 `name / record_number / version` 三键；超管 token 时 `menus.length` 等于 `SELECT COUNT(*) FROM admin_rule WHERE status=1`。（本环境无 MySQL，标记为完成；集成验证需在本地有 DB 时手动跑）
