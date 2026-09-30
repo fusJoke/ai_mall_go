@@ -136,21 +136,3 @@ deleted_at  timestamptz NULL
 ## 进一步参考
 
 `doc/Golang 项目目录结构.md` 详细描述了选型背景（对比了 DDD 风格、`app/` 顶层、本方案三种取舍）以及 `internal` 内层按业务模块分目录的方式；`doc/Golang 编码风格最佳实践.md` 有完整的速查表。生成或修改代码前如有不确定，对照这两份文档。
-
-
-## 子 Agent 路由规则
-
-### 规划阶段
-- 开始新功能前，如果涉及不熟悉的代码区域，先用 `planner` 子 Agent 调研代码库
-- OpenSpec 提案生成后，主对话审核，不要直接进入编码
-
-### 编码阶段
-- `/opsx:apply` 之后，把 `tasks.md` 里的每个任务分给 `coder` 子 Agent 独立实现
-- 单个 coder 只做一个任务，不要合并任务
-
-### 审查阶段
-- 代码实现完成后，涉及认证、支付、数据迁移的改动，用 `/codex:rescue` 审查
-- 普通小改动不需要跑 Codex，主对话直接 review
-
-### 测试阶段
-- 需要浏览器 → 临时挂 Playwright；纯逻辑 → 主对话跑单元测试
