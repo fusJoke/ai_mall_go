@@ -1,0 +1,18 @@
+choice: Choose
+screenshotUpload: Screenshot upload
+dropImageHereToUpload: Drop image here to upload
+dropFileHereToUpload: Drop file here to upload
+copyPasteUploadTip: You can paste with Ctrl+V or drop a file
+noImageInClipboard: No image in clipboard
+noValidFileInPaste: No valid file in paste
+noValidImageInDrop: Dropped item is not an image
+noValidFileInDrop: No valid file in drop
+clipboardReadNotSupported: Current browser does not support clipboard read
+failedToReadClipboard: Failed to read clipboard
+selectFile: Select File
+originalName: Original name
+url: URL
+operate: Operate
+noData: No data
+youCanAlsoSelect: You can also select
+items: item(s)

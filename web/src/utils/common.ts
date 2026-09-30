@@ -4,6 +4,8 @@ import { RouteLocationNormalized, RouteRecordRaw } from 'vue-router'
 import router from '/@/router/index'
 import { adminBaseRoutePath } from '/@/router/static/adminBase'
 import { useMenu } from '/@/stores/menu'
+import { getBaseUrlPort } from '/@/utils/request'
+import { useConfig } from '/@/stores/config'
 
 /**
  * 获取 globalProperties 对象
@@ -169,4 +171,76 @@ export function keysToSnakeCase(obj: any): any {
  */
 export const isExternal = (path: string): boolean => {
     return /^(https?:|mailto:|tel:)/.test(path)
+}
+
+/**
+ * 把资源路径拼成完整 URL。与后端 kit/urlx.FullURL 行为对齐。
+ *
+ * 分支：
+ *  1. 空串 → ""
+ *  2. base64 data URI → 原样
+ *  3. http:// / https:// 绝对地址 → 原样
+ *  4. useConfig().cdnUrl 非空 → cdnUrl + (ensureLeadingSlash cdnUrlParams) + resource
+ *  5. 否则 → getBaseUrlPort() + resource
+ */
+export const fullURL = (resource: string): string => {
+    if (!resource) return ''
+    if (resource.startsWith('data:')) return resource
+    if (resource.startsWith('http://') || resource.startsWith('https://')) return resource
+
+    const cfg = useConfig()
+    if (cfg.cdnUrl) {
+        const params = cfg.cdnUrlParams
+        const sep = params && !params.startsWith('/') ? '/' : ''
+        return cfg.cdnUrl + sep + params + resource
+    }
+
+    return getBaseUrlPort() + resource
+}
+
+/**
+ * fullURL 的批量版：对数组内每个元素逐个走 fullURL。
+ * 用于 agUpload 等组件一次性返回多个完整 URL。
+ */
+export const fullURLArray = (arr: string[]): string[] => {
+    return arr.map((s) => fullURL(s))
+}
+
+/**
+ * 把字符串 / 数组统一为字符串数组：
+ *   - 数组 → 原样（去掉空元素）
+ *   - 字符串 → 按逗号拆（去掉空元素）
+ *   - 其它 → []
+ */
+export const stringToArray = (val: string | string[]): string[] => {
+    if (Array.isArray(val)) return val.filter((s) => s !== '')
+    if (typeof val === 'string') {
+        return val
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s !== '')
+    }
+    return []
+}
+
+/**
+ * 从 URL / 路径中提取文件名（去掉 query / hash / 目录）。
+ */
+export const getFileNameFromPath = (path: string): string => {
+    if (!path) return ''
+    // 去掉 query 和 hash
+    let cleanPath = path.split('?')[0].split('#')[0]
+    // 取最后一段
+    const parts = cleanPath.split('/')
+    return parts[parts.length - 1] || ''
+}
+
+/**
+ * 在对象数组 arr 中按 key/value 查找下标，未命中返回 false。
+ */
+export const getArrayKey = (arr: anyObj[], key: string, value: any): number | false => {
+    for (let i = 0; i < arr.length; i++) {
+        if (arr[i] && arr[i][key] === value) return i
+    }
+    return false
 }

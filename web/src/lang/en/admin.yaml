@@ -1,0 +1,27 @@
+# admin manager page i18n — mirrors web/src/lang/zh-cn/admin.yaml.
+
+manager:
+  title: Admin Manager
+  searchPlaceholder: Search username / nickname
+  columns:
+    username: Username
+    nickname: Nickname
+    email: Email
+    mobile: Mobile
+    status: Status
+    lastLoginAt: Last Login
+    createdAt: Created At
+  dialog:
+    create: Create Admin
+    edit: Edit Admin
+    changePassword: Change Password
+  action:
+    changePassword: Change Password
+    toggleStatus: Toggle Status
+    unlock: Unlock
+    delete: Delete
+    batchDelete: Batch Delete
+  confirm:
+    delete: Are you sure to delete this admin?
+    batchDelete: Are you sure to batch delete selected admins?
+    changePassword: Are you sure to change this admin's password?

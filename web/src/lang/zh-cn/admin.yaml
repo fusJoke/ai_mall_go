@@ -1,0 +1,29 @@
+# admin 管理页 i18n —— 见 openspec/changes/add-admin-management/design.md D12。
+# 文件结构：按 buildadmin 风格嵌套分组（manager.dialog.* / manager.action.* 等），
+# 与项目内现有扁平 key 风格（layouts.yaml）共存：组件级沿用扁平，业务页用嵌套。
+
+manager:
+  title: 管理员账号
+  searchPlaceholder: 搜索用户名 / 昵称
+  columns:
+    username: 用户名
+    nickname: 昵称
+    email: 邮箱
+    mobile: 手机号
+    status: 状态
+    lastLoginAt: 最后登录
+    createdAt: 创建时间
+  dialog:
+    create: 新建管理员
+    edit: 编辑管理员
+    changePassword: 修改密码
+  action:
+    changePassword: 改密
+    toggleStatus: 启停
+    unlock: 解锁
+    delete: 删除
+    batchDelete: 批量删除
+  confirm:
+    delete: 确定要删除该管理员吗？
+    batchDelete: 确定要批量删除选中的管理员吗？
+    changePassword: 确定要修改该管理员的密码吗？

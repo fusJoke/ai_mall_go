@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { STORE_CONFIG } from '/@/stores/constant/cacheKey'
 import type { Crud, Lang, Layout, SiteConfig } from '/@/stores/interface'
 import { useNavTabs } from '/@/stores/navTabs'
@@ -142,8 +142,20 @@ export const useConfig = defineStore(
             version: '',
         })
 
+        // CDN 配置（来自 config.yaml 中的 server.cdn_url / server.cdn_url_params）。
+        // 与 siteConfig 平级，单独 ref 暴露 —— fullURL 等 util 需要在 store 内部访问。
+        const cdnUrl = ref<string>('')
+        const cdnUrlParams = ref<string>('')
+
         const setSiteConfig = (data: Partial<SiteConfig>) => {
             Object.assign(siteConfig, data)
+        }
+
+        // setCDNConfig 由启动期 / 配置同步入口调用（当前直接读 yaml 注入；
+        // 后续若改为后端下发，可在此集中入口覆盖）。
+        const setCDNConfig = (url: string, params: string) => {
+            cdnUrl.value = url
+            cdnUrlParams.value = params
         }
 
         return {
@@ -151,6 +163,8 @@ export const useConfig = defineStore(
             lang,
             crud,
             siteConfig,
+            cdnUrl,
+            cdnUrlParams,
             menuWidth,
             setLang,
             setLayoutMode,
@@ -158,6 +172,7 @@ export const useConfig = defineStore(
             getColorVal,
             setCrud,
             setSiteConfig,
+            setCDNConfig,
         }
     },
     {
