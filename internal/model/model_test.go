@@ -30,6 +30,18 @@ func TestRegister_AndAll(t *testing.T) {
 	if !got[reflect.TypeOf(fakeModel{})] {
 		t.Errorf("expected fakeModel to be registered, got %v", all)
 	}
+	if !got[reflect.TypeOf(Admin{})] {
+		t.Errorf("expected Admin to be registered, got %v", all)
+	}
+	if !got[reflect.TypeOf(AdminRule{})] {
+		t.Errorf("expected AdminRule to be registered, got %v", all)
+	}
+	if !got[reflect.TypeOf(AdminGroup{})] {
+		t.Errorf("expected AdminGroup to be registered, got %v", all)
+	}
+	if !got[reflect.TypeOf(AdminGroupAccess{})] {
+		t.Errorf("expected AdminGroupAccess to be registered, got %v", all)
+	}
 }
 
 func TestRegister_DedupByType(t *testing.T) {
