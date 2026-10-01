@@ -25,3 +25,40 @@ manager:
     delete: Are you sure to delete this admin?
     batchDelete: Are you sure to batch delete selected admins?
     changePassword: Are you sure to change this admin's password?
+
+rule:
+  title: Menu Rule
+  searchPlaceholder: Search title / name
+  columns:
+    id: ID
+    pid: Parent
+    type: Type
+    title: Title
+    name: Name
+    path: Path
+    icon: Icon
+    weigh: Weigh
+    status: Status
+    updatedAt: Updated At
+  typeOptions:
+    dir: Directory
+    menu: Menu
+    node: Permission Node
+  statusOptions:
+    enabled: Enabled
+    disabled: Disabled
+  dialog:
+    create: Create Menu Rule
+    edit: Edit Menu Rule
+  action:
+    edit: Edit
+    toggleStatus: Toggle Status
+    delete: Delete
+    batchDelete: Batch Delete
+  confirm:
+    delete: Are you sure to delete this rule?
+    batchDelete: Are you sure to batch delete selected rules?
+  error:
+    pidCycle: A rule cannot be set as the child of itself or its descendants
+    hasChildren: This rule still has children; please delete them first
+    notFound: The menu rule does not exist

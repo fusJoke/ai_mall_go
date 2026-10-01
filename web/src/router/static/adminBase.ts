@@ -53,6 +53,18 @@ const adminBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 静态子路由：菜单规则管理页（add-admin-rule-management）
+            // 同 manager：不在 dynamic 路由表，admin_rule 表里有同名菜单种子，
+            // 这里挂静态子路由便于在 admin 登录态下直接访问 /admin/rule。
+            path: 'rule',
+            name: 'adminRule',
+            component: () => import('/@/views/admin/rule/index.vue'),
+            meta: {
+                title: 'pageTitles.adminRule',
+                noAuth: false,
+            },
+        },
+        {
             // 后台子路径兜底 — 走 loading 路由，让 loading 页面尝试从后端懒加载目标路由
             path: ':path(.*)*',
             redirect: (to) => {

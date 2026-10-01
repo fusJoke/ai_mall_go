@@ -10,3 +10,4 @@ passwordMinLength: Password must be at least 6 characters
 loggedIn: You are already logged in, no need to log in again
 agInput: Component Demo
 adminManager: Admin Manager
+adminRule: Menu Rule
