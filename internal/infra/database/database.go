@@ -114,7 +114,8 @@ func openWrite(dbCfg config.DatabaseConfig) (*gorm.DB, error) {
 
 	opened, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
-			TablePrefix: dbCfg.Prefix,
+			TablePrefix:   dbCfg.Prefix,
+			SingularTable: true,
 		},
 	})
 	if err != nil {

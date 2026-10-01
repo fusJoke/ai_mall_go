@@ -95,4 +95,8 @@ func init() {
 	// admin 管理页 9 条路由（5 通用 CRUD + 4 专属），全部挂 AdminAuth。
 	// 拆到 manager.go 是为了本文件聚焦"基础设施"主线（login / logout / init / upload / ping）。
 	registerManagerRoutes()
+
+	// 菜单规则管理页 8 条路由（5 通用 CRUD + 3 专属），全部挂 AdminAuth。
+	// 拆到 rule.go 是为了 manager.go 维持"管理员自身管理"主线。
+	registerRuleRoutes()
 }

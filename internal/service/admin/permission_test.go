@@ -3,9 +3,11 @@ package admin
 import (
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"ai-go-mall/internal/model"
+	"ai-go-mall/internal/repository"
 )
 
 // =============================================================================
@@ -87,6 +89,27 @@ func (m *mockRuleRepository) ListActiveAsMenu() ([]model.AdminRule, error) {
 		}
 	}
 	return out, nil
+}
+
+// 以下 9 个方法是 add-admin-rule-management 扩展后 RuleRepository 接口新
+// 增的方法 —— permission 路径不调用，permission_test 只关心只读方法。
+// 这里全部返回零值（nil/0/false）即可满足接口约束，permission 测试不受影响。
+func (m *mockRuleRepository) Create(_ *gin.Context, _ *model.AdminRule) error { return nil }
+func (m *mockRuleRepository) Update(_ *gin.Context, _ *model.AdminRule) error { return nil }
+func (m *mockRuleRepository) Delete(_ *gin.Context, _ uint) error           { return nil }
+func (m *mockRuleRepository) DeleteBatch(_ *gin.Context, _ []uint) error     { return nil }
+func (m *mockRuleRepository) UpdateStatus(_ *gin.Context, _ uint, _ int8) error {
+	return nil
+}
+func (m *mockRuleRepository) GetPID(_ *gin.Context, _ uint) (uint, error) { return 0, nil }
+func (m *mockRuleRepository) HasChildren(_ *gin.Context, _ uint) (bool, error) {
+	return false, nil
+}
+func (m *mockRuleRepository) GetByID(_ *gin.Context, _ uint) (*model.AdminRule, error) {
+	return nil, nil
+}
+func (m *mockRuleRepository) List(_ *gin.Context, _ repository.ListOptions) ([]model.AdminRule, int64, error) {
+	return nil, 0, nil
 }
 
 // mockGroupRepository 实现 GroupRepository。

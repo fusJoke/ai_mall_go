@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ai-go-mall/internal/model"
+	"ai-go-mall/internal/repository"
 )
 
 // ptrStr 构造 *string 字面量。
@@ -231,6 +232,23 @@ func (m *initMockRule) ListActiveAsMenu() ([]model.AdminRule, error) {
 	out := make([]model.AdminRule, len(m.activeMenu))
 	copy(out, m.activeMenu)
 	return out, nil
+}
+
+// 以下 9 个方法是 add-admin-rule-management 扩展后 RuleRepository 接口新
+// 增的方法 —— init 路径（NewInitService）只走 4 个只读方法，其余不被调用。
+// 全部 stub 成零值返回即可满足接口约束。
+func (m *initMockRule) Create(_ *gin.Context, _ *model.AdminRule) error { return nil }
+func (m *initMockRule) Update(_ *gin.Context, _ *model.AdminRule) error { return nil }
+func (m *initMockRule) Delete(_ *gin.Context, _ uint) error             { return nil }
+func (m *initMockRule) DeleteBatch(_ *gin.Context, _ []uint) error       { return nil }
+func (m *initMockRule) UpdateStatus(_ *gin.Context, _ uint, _ int8) error { return nil }
+func (m *initMockRule) GetPID(_ *gin.Context, _ uint) (uint, error)      { return 0, nil }
+func (m *initMockRule) HasChildren(_ *gin.Context, _ uint) (bool, error)  { return false, nil }
+func (m *initMockRule) GetByID(_ *gin.Context, _ uint) (*model.AdminRule, error) {
+	return nil, nil
+}
+func (m *initMockRule) List(_ *gin.Context, _ repository.ListOptions) ([]model.AdminRule, int64, error) {
+	return nil, 0, nil
 }
 
 type initMockGroup struct {
