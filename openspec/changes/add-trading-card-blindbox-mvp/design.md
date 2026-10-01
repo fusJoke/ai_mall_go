@@ -184,6 +184,37 @@ MultiLevelCache.Del(key)
 
 **为什么不用 LRU 而用 TTL**：MVP 缓存场景固定 3 类，容量可控；TTL 简单可靠。
 
+### D5.1：缓存防穿透——Negative Cache（NotFound 占位）
+
+**问题**：攻击者/用户查询不存在的 key → Redis miss → DB miss → 每次都打 DB。高并发下 DB 被打挂。
+
+**方案**：DB 查询返回 `ErrNotFound` 时，缓存一个空值占位（TTL 较短如 30s）；后续相同 key 请求直接命中空值，返回"不存在"。
+
+**统一抽象**：所有缓存层（L1/L2/Hotspot）共用一套防穿透语义：
+- DB 返回 `ErrNotFound` → 缓存 `notFound` 占位 → 后续读直接返回 `ErrNotFound`
+- TTL 较短（30s-60s）防止"数据真的不存在但被恶意长期占位"
+- 写时主动 invalidate 占位（业务数据写入后失效）
+
+**实现位置**：
+- L1/L2 缓存：在 `MultiLevelCache.Get` 的 loader 中检测 `ErrNotFound`，写回 `notFound` marker
+- Hotspot 缓存：HotspotLoader 返回 `ErrNotFound` 时缓存 `notFound`（带 `RefreshedAt=now`）
+- 业务 service：不必感知，loader 函数本身决定是否返回 `ErrNotFound`
+
+**notFound 数据结构**（L1/L2 用）：
+```go
+// sentinel：单独的类型 + JSON 标记
+type notFoundSentinel struct{}
+// 序列化：{"_notFound": true}
+// 反序列化：检测到 _notFound 字段 → 返回 ErrNotFound
+```
+
+**Hotspot 用**：data 字段是 `any`，可以缓存 `*notFoundPayload`（带 RefreshedAt），staleAfter 后重新触发 loader。
+
+**关键决策**：
+- 不用 bloom filter（额外依赖 + 误判）
+- 不用 rate limit（已有 L1/L2 限流，覆盖正常用户；穿透防护针对攻击者）
+- 不用持久化 negative cache（短 TTL 足够）
+
 为什么详情缓存 + ES 缓存 + 限流三类，其他不做：
 - 库存/balance 一致性复杂，超卖风险高，MVP 不承担
 - token session：MVP 不切换 driver，仍用 database
@@ -872,6 +903,11 @@ data, err := hotspot.Get(ctx, "hotspot:blindbox:1",
 - 完全 miss 时同步查 DB（不可避免）
 - 高并发下用 singleflight 合并请求（避免雪崩）
 - `golang.org/x/sync/singleflight` 提供 Do/DoChan
+
+**穿透防护**（与 D5.1 统一）：
+- HotspotLoader 返回 `ErrNotFound` 时缓存 `notFound` 占位（RefreshedAt=now）
+- 后续相同 key 请求直接返回 `ErrNotFound`，不查 DB
+- 主动 invalidate（如盲盒新建后）：下次读触发冷启动路径走 loader
 
 **与其他缓存的关系**：
 ```

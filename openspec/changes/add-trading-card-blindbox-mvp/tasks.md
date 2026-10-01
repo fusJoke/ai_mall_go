@@ -200,3 +200,14 @@
 - [ ] 16.7 修改 `internal/service/supplier/product.go` 的 Update：事务提交后调 `hotspot.Invalidate("hotspot:blindbox:{id}")`
 - [ ] 16.8 依赖新增：`golang.org/x/sync`（已有，singleflight 子包）
 - [ ] 16.9 集成测试：100 并发请求 cold start → singleflight 合并后只 1 个打 DB；逻辑时间到期后 1 个抢锁异步刷新，其他 99 返回老数据
+
+## 17. 缓存防穿透（对应 D5.1 / D21 扩展）
+
+- [ ] 17.1 修改 `internal/infra/cache/cache.go`：`Cache` 接口的 `Get` 返回值增加 `bool found`（区分 hit/miss/NotFound）
+- [ ] 17.2 `internal/infra/cache/multi.go`：MultiLevelCache 在 loader 返回 `ErrNotFound` 时缓存 `notFound` 占位（JSON `{"_notFound": true}` + TTL 30s）
+- [ ] 17.3 `internal/infra/cache/hotspot/redis_hotspot.go`：HotspotLoader 返回 `ErrNotFound` 时缓存 `*notFoundPayload{RefreshedAt: now}`（TTL 30s，与普通数据同 TTL=0 但加 special marker）
+- [ ] 17.4 统一工具 `internal/infra/cache/notfound.go`：`IsNotFound(err)` / `WrapNotFound(val)` / `UnwrapNotFound(val)` helper
+- [ ] 17.5 修改 `internal/service/user/blindbox.go` 的 Detail loader：DB 查不到返回 `ErrNotFound`
+- [ ] 17.6 修改 `internal/service/user/home.go` 的 Feed loader：ES 查不到（不算 NotFound，正常空数组） → 不缓存 NotFound（仅针对"key 本身无效"才缓存）
+- [ ] 17.7 集成测试：1000 并发请求 NotFound key → DB 只被打 1 次；30s 后占位过期，loader 重新查 DB
+- [ ] 17.8 集成测试：admin 创建新 blind_box 后 hotspot.Invalidate → 下次读触发冷启动加载真实数据（不会被 NotFound 占位误导）

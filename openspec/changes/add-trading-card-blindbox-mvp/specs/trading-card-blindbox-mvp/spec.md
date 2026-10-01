@@ -1004,3 +1004,34 @@ type HotspotCache interface {
 #### Scenario: Lock release safety via Lua script
 - **WHEN** 持锁者 goroutine panic / 超时（5s TTL 自动释放）
 - **THEN** Lua 脚本保证新持锁者能正确获取；不会误删别人的锁
+
+---
+
+### Requirement: Cache penetration protection (negative cache)
+
+所有缓存层（L1/L2 MultiLevelCache + Hotspot）SHALL 实现穿透防护：
+
+- DB 查询返回 `ErrNotFound` 时，缓存一个 `notFound` 占位（TTL 短：30s-60s）
+- 后续相同 key 请求直接命中占位，返回 `ErrNotFound`，**不查 DB**
+- 业务写入时主动 invalidate 占位（让真实数据能被加载）
+- L1/L2 用 JSON `{"_notFound": true}` 标记；Hotspot 用 `*notFoundPayload{RefreshedAt: now}`
+
+**NotFound TTL 选择**：
+- 30s（默认）：平衡"穿透防护"与"新数据可被发现"的窗口
+- 60s（保守）：防护更强，但新数据要 60s 后才可见
+
+#### Scenario: Non-existent key returns NotFound from cache
+- **WHEN** 第一次请求 `blindbox:detail:99999`（盲盒不存在），loader 返回 `ErrNotFound`
+- **THEN** 缓存写入 `notFound` 占位（TTL 30s）；第二次相同请求直接返回 `ErrNotFound`，不打 DB
+
+#### Scenario: Penetration attack blocked
+- **WHEN** 1000 并发请求查询不存在的 key
+- **THEN** 第 1 次 loader 查 DB 返回 NotFound；后续 999 次命中占位；DB 只被打 1 次
+
+#### Scenario: New data invalidates NotFound placeholder
+- **WHEN** admin 创建 blind_box id=99999（之前不存在），调 `hotspot.Invalidate("hotspot:blindbox:99999")`
+- **THEN** NotFound 占位被 DEL；下次读触发冷启动 → loader 查 DB 返回真实数据 → 写回 cache
+
+#### Scenario: NotFound TTL expires and re-loads
+- **WHEN** 30s 后再次请求之前 NotFound 的 key（数据仍不存在）
+- **THEN** TTL 到期占位失效；走冷启动路径 → loader 查 DB → 重新写入新占位
