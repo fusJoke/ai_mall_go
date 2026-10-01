@@ -211,3 +211,18 @@
 - [ ] 17.6 修改 `internal/service/user/home.go` 的 Feed loader：ES 查不到（不算 NotFound，正常空数组） → 不缓存 NotFound（仅针对"key 本身无效"才缓存）
 - [ ] 17.7 集成测试：1000 并发请求 NotFound key → DB 只被打 1 次；30s 后占位过期，loader 重新查 DB
 - [ ] 17.8 集成测试：admin 创建新 blind_box 后 hotspot.Invalidate → 下次读触发冷启动加载真实数据（不会被 NotFound 占位误导）
+
+## 18. 缓存预热 + TTL 抖动（对应 D23）
+
+- [ ] 18.1 新增迁移 `000013_mall_user_follow_supplier.{up,down}.sql`：建 mall_user_follow_supplier 表，唯一索引 `(user_id, supplier_id)`
+- [ ] 18.2 新增 model：`MallUserFollowSupplier`
+- [ ] 18.3 新增 `internal/repository/mall/follow_repository.go`：Follow / Unfollow / ListFollowers / ListFollowing + sqlmock 单测
+- [ ] 18.4 新增 `internal/handler/user/follow.go`：POST/DELETE/GET 关注相关接口
+- [ ] 18.5 新增 `internal/router/user/router.go` 注册 3 条 follow 路由
+- [ ] 18.6 新增 `internal/infra/cache/jitter.go`：`JitterTTL(base time.Duration) time.Duration` helper
+- [ ] 18.7 修改所有缓存 TTL 配置：baseTTL + `JitterTTL()` 包装
+- [ ] 18.8 新增 `internal/service/preheat/preheat.go`：`PromotionPreheat(ctx, promotion)` / `SeckillPreheat(ctx, seckill)` 异步预热函数
+- [ ] 18.9 修改 `internal/service/supplier/promotion.go` 的 Create：事务 COMMIT 后 `go preheat.PromotionPreheat(p)`
+- [ ] 18.10 修改 `internal/service/supplier/seckill.go` 的 Create：事务 COMMIT 后 `go preheat.SeckillPreheat(s)`
+- [ ] 18.11 前端：用户中心新增"我的关注"页面；盲盒详情页"关注卡商"按钮
+- [ ] 18.12 单测：JitterTTL 在范围内；预热失败不影响主业务

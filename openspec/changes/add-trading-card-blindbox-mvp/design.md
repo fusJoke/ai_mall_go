@@ -69,6 +69,7 @@ MVP 目标：在「概率公示 + 随机抽取 + 多供应商入驻 + 限时特�
 | `mall_platform_ledger` | 平台收入台账（counter 聚合） | counter_key(PK) / amount |
 | `mall_seckill_activities` | 秒杀活动主体 | supplier_id / blind_box_id / seckill_price / total_stock / per_user_limit / start_at / end_at / status / redis_initialized |
 | `mall_stock_deduction_log` | 秒杀扣减记录 | seckill_id / user_id / blind_box_id / card_id / rarity / snapshot_name / snapshot_image / deducted_at / synced_to_pool_at |
+| `mall_user_follow_supplier` | 用户关注供应商关系 | user_id / supplier_id / created_at / deleted_at |
 
 关键约束：
 - `mall_blind_boxes.supplier_id` 强制 NOT NULL（纯多供应商模式，平台不自营）
@@ -936,6 +937,93 @@ data, err := hotspot.Get(ctx, "hotspot:blindbox:1",
 - 高并发下 Hotspot 完全 miss 时避免 N 个请求同时打 DB
 - 第一个请求查 DB，其他请求等待结果复用
 - 典型场景：缓存重启后瞬时高并发
+
+### D23：缓存预热 + TTL 随机抖动
+
+**业务动机**：
+- 限时特价 / 秒杀活动开始瞬间，会有大量请求涌入
+- 如果此时缓存是冷的，每个请求都触发 cold start → DB 单点打挂
+- 解决方案：活动创建时**预先**触发相关缓存加载，让活动开始时缓存已是热的
+
+**预热触发时机**：
+- 供应商创建 `mall_promotion`（限时特价）成功后
+- 供应商创建 `mall_seckill_activity`（秒杀活动）成功后
+- 事务 COMMIT 后 `go func()` 异步执行（不阻塞主业务）
+
+**预热对象**：
+
+| 预热对象 | Key 模式 | Loader | staleAfter |
+|---|---|---|---|
+| 该供应商的所有盲盒详情 | `hotspot:blindbox:{id}` | 查 blind_box + 当前活动 | 30s |
+| 关注该供应商的用户的首页 feed | `hotspot:feed:user:{uid}` | 走 ES 查该用户推荐 feed | 60s |
+
+**预热算法**：
+```
+OnPromotionCreated(promotion *MallPromotion):
+  go preheat.PromotionPreheat(promotion)
+
+func PromotionPreheat(p *MallPromotion):
+  // 1. 预热该供应商的所有盲盒详情
+  blindBoxIDs = repo.ListActiveBlindBoxIDs(p.SupplierID)
+  for id in blindBoxIDs:
+    hotspot.Get(ctx, "hotspot:blindbox:"+id, blindBoxLoader, 30*time.Second)
+  
+  // 2. 预热关注该供应商的用户的 feed
+  followerIDs = repo.ListFollowerIDs(p.SupplierID)
+  for uid in followerIDs:
+    hotspot.Get(ctx, "hotspot:feed:user:"+uid, feedLoader, 60*time.Second)
+```
+
+**新增实体**：`mall_user_follow_supplier`（用户关注供应商关系表）
+
+| 字段 | 类型 | 默认值 | 可空 | 说明 |
+|---|---|---|---|---|
+| `id` | bigint | auto | 否 | 主键 |
+| `user_id` | bigint | 0 | 否 | FK mall_users.id |
+| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
+| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+唯一索引：`(user_id, supplier_id)`
+
+**用户关注 / 取关接口**（MVP）：
+```
+POST   /api/v1/user/follow/suppliers/:supplier_id   关注
+DELETE /api/v1/user/follow/suppliers/:supplier_id   取关
+GET    /api/v1/user/follow/suppliers                我的关注列表
+```
+
+**TTL 随机抖动**：
+
+```
+baseTTL = 30s (Hotspot) / 10min (Redis L2) / 5min (Feed L2)
+actualTTL = baseTTL + rand[0, baseTTL/4)  // +0%~+25% 正抖动
+```
+
+**为什么正抖动而非 ±20% 对称**：
+- 正抖动让 TTL 只增不减，避免"提前过期"导致数据不一致窗口
+- 防雪崩目标：错开过期时间，对称还是正抖动都能达到，正抖动更保守
+
+**实现位置**：
+- `internal/infra/cache/jitter.go`：封装 `JitterTTL(base time.Duration) time.Duration`
+- 所有缓存 TTL 配置经过此函数包装
+
+**预热失败处理**：
+- 预热异步 goroutine 失败仅记 warn 日志
+- 不影响主业务（活动创建已成功）
+- 下次正常请求触发 cold start 路径补齐
+
+**预热的边界（不做）**：
+- ❌ 不预热所有用户的 feed（成本不可控）
+- ❌ 不预热秒杀活动本身（秒杀名额是 Redis 计数，不是 cache）
+- ❌ 不预热历史订单（量太大）
+- ✅ 只预热"活动关联的供应商"范围
+
+**为什么用 goroutine 而非 MQ 消息**：
+- 预热是 fire-and-forget，不需要持久化
+- 不需要重试（失败靠下次请求补齐）
+- goroutine 启动成本比 MQ publish 低（无序列化、无 broker IO）
+- MVP 简化：先 goroutine，量大了再迁 MQ
 
 ## Architecture
 

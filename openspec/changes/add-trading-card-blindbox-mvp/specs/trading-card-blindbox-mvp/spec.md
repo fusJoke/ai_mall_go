@@ -1034,4 +1034,77 @@ type HotspotCache interface {
 
 #### Scenario: NotFound TTL expires and re-loads
 - **WHEN** 30s 后再次请求之前 NotFound 的 key（数据仍不存在）
-- **THEN** TTL 到期占位失效；走冷启动路径 → loader 查 DB → 重新写入新占位
+- **THEN** TTL 到位失效；走冷启动路径 → loader 查 DB → 重新写入新占位
+
+---
+
+### Requirement: mall_user_follow_supplier field schema
+
+`mall_user_follow_supplier` 表 SHALL 存储用户关注供应商关系（迁移 000013）：
+
+| 字段 | 类型 | 默认值 | 可空 | 说明 |
+|---|---|---|---|---|
+| `id` | bigint | auto | 否 | 主键 |
+| `user_id` | bigint | 0 | 否 | FK mall_users.id |
+| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
+| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+唯一索引：`(user_id, supplier_id)`
+
+#### Scenario: User follows supplier
+- **WHEN** user 调用 `POST /api/v1/user/follow/suppliers/10`
+- **THEN** mall_user_follow_supplier 写入一条 user_id=uid, supplier_id=10 记录
+
+#### Scenario: Idempotent follow
+- **WHEN** 重复关注同一供应商
+- **THEN** 唯一索引拒绝，返回 `ErrAlreadyFollowed` (HTTP 409)
+
+---
+
+### Requirement: Cache preheat on promotion/seckill creation
+
+创建限时特价 / 秒杀活动成功后 SHALL 异步预热相关缓存：
+
+**预热对象**：
+1. 该供应商的所有 active blind_box 详情（`hotspot:blindbox:{id}`）
+2. 关注该供应商的所有用户的首页 feed（`hotspot:feed:user:{uid}`）
+
+**触发方式**：事务 COMMIT 后 `go preheat.PromotionPreheat(promotion)`（异步，不阻塞主业务）。
+
+**失败处理**：预热 goroutine 失败仅记 warn 日志，不影响活动创建结果。
+
+#### Scenario: Promotion created triggers preheat
+- **WHEN** 供应商创建限时特价活动成功
+- **THEN** 异步预热：
+  - 该 supplier_id 下所有 active blind_box 的详情
+  - 关注该 supplier_id 的所有用户的 feed
+  - 不阻塞活动创建响应
+
+#### Scenario: Seckill created triggers preheat
+- **WHEN** 供应商创建秒杀活动成功
+- **THEN** 同上预热逻辑
+
+#### Scenario: Preheat failure does not rollback creation
+- **WHEN** 预热 goroutine 抛 panic 或 loader 报错
+- **THEN** 活动创建事务不回滚（已 COMMIT）；warn 日志；下次正常请求触发 cold start 补齐
+
+---
+
+### Requirement: TTL random jitter
+
+所有缓存 TTL SHALL 经过 `JitterTTL(base)` 处理，添加 +0%~+25% 的随机抖动：
+
+```go
+func JitterTTL(base time.Duration) time.Duration {
+    return base + time.Duration(rand.Int63n(int64(base)/4))
+}
+```
+
+#### Scenario: TTL within jitter range
+- **WHEN** 配置 baseTTL=30s
+- **THEN** 实际 TTL 在 [30s, 37.5s) 之间随机
+
+#### Scenario: Jitter prevents synchronized expiration
+- **WHEN** 1000 个 key 同时写入（baseTTL=10min）
+- **THEN** 实际 TTL 在 [10min, 12.5min) 之间均匀分布；不会出现"全部同时过期"
