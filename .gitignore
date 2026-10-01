@@ -51,3 +51,5 @@ desktop.ini
 .playwright-mcp/
 # 一次性调试截图，例如 e2e 失败时手动截屏
 /login-error.png
+# GUI 黑盒测试证据截图（本地留存，不入库）
+/gui-test-screenshots/

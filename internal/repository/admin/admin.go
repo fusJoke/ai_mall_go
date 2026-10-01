@@ -6,6 +6,7 @@ package admin
 
 import (
 	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,6 +38,16 @@ type Repository interface {
 	// ResetLoginFailure 重置登录失败计数 + 恢复启用状态（admin 管理页"解锁"场景）。
 	// 一次性写两列：login_failure=0, status=1。
 	ResetLoginFailure(c *gin.Context, id uint) error
+
+	// UpdateLoginFailure 仅更新登录失败相关列（Login 密码错误分支专用）。
+	// 固定写 login_failure=failure；locked=true 时同时写 status=0（触发锁定）。
+	// MUST NOT 携带 password 列 —— 模型里的 Password 是哈希，整行更新会把它二次哈希。
+	UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error
+
+	// UpdateLoginSuccess 仅更新登录成功记账列（Login 成功分支专用）：
+	// 一次性写 login_failure=0, last_login_at=at, last_login_ip=ip。
+	// 同样 MUST NOT 携带 password 列。
+	UpdateLoginSuccess(c *gin.Context, id uint, ip string, at time.Time) error
 }
 
 // baseRepository 是 Repository 的默认实现。
@@ -118,6 +129,35 @@ func (r *baseRepository) ResetLoginFailure(c *gin.Context, id uint) error {
 		Updates(map[string]any{
 			"login_failure": 0,
 			"status":        int8(1),
+		}).Error
+}
+
+// UpdateLoginFailure 仅写 login_failure（及触锁时的 status）。
+//
+// locked 与否通过向 map 追加 "status" 键实现，最终仍是单条 UPDATE；
+// map 形式 Updates 只写出现的列，Password / Nickname 等字段不受影响。
+func (r *baseRepository) UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error {
+	cols := map[string]any{"login_failure": failure}
+	if locked {
+		cols["status"] = int8(0)
+	}
+	return repository.DB(c).
+		Model(&model.Admin{}).
+		Where("id = ?", id).
+		Updates(cols).Error
+}
+
+// UpdateLoginSuccess 一次性写 login_failure=0, last_login_at, last_login_ip。
+//
+// at 由 service 层传入（与签发 token 的 ExpiresAt 共用同一时刻）。
+func (r *baseRepository) UpdateLoginSuccess(c *gin.Context, id uint, ip string, at time.Time) error {
+	return repository.DB(c).
+		Model(&model.Admin{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"login_failure": 0,
+			"last_login_at": at,
+			"last_login_ip": ip,
 		}).Error
 }
 

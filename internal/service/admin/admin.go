@@ -188,13 +188,17 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 	// 3) 密码错误：递增失败计数。达到阈值就把 Status 置 0（锁定），并吊销该账号
 	// 既有 token —— 否则攻击者在被锁前签发的合法 token 在剩余 TTL 内仍能访问受保护资源。
 	// 落库 / Clear 失败不阻塞登录失败响应（防御动作，非关键路径）。
+	//
+	// 落库走定向列更新（UpdateLoginFailure），禁止走 s.Update：此处模型带出的是
+	// 哈希形态的 Password，整行更新会被 hashPasswordIfNeeded 二次哈希，
+	// 导致正确密码永久失效（P0，见 openspec/changes/fix-admin-login-password-rehash）。
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(adm.Password), []byte(password)); bcryptErr != nil {
-		adm.LoginFailure++
-		if adm.LoginFailure >= MaxLoginFailure {
-			adm.Status = 0
+		failure := adm.LoginFailure + 1
+		locked := failure >= MaxLoginFailure
+		if locked {
 			_ = s.tm.Clear(c.Request.Context(), adm.ID, tokenTypeAdmin)
 		}
-		_ = s.Update(c, adm)
+		_ = s.repo.UpdateLoginFailure(c, uint(adm.ID), failure, locked)
 		return nil, "", ErrInvalidCredentials
 	}
 
@@ -204,11 +208,13 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 	}
 
 	// 5) 登录成功：清零失败次数 + 记录最后登录。
-	adm.LoginFailure = 0
+	// 内存模型同步赋值仅供登录响应体展示；DB 落库走定向列更新（UpdateLoginSuccess），
+	// 原因同分支 3 —— 禁止把带哈希 Password 的模型交给 s.Update。
 	now := time.Now()
+	adm.LoginFailure = 0
 	adm.LastLoginAt = &now
 	adm.LastLoginIp = c.ClientIP()
-	if err := s.Update(c, adm); err != nil {
+	if err := s.repo.UpdateLoginSuccess(c, uint(adm.ID), adm.LastLoginIp, now); err != nil {
 		return nil, "", err
 	}
 

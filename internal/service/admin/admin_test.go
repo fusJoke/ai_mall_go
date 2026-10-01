@@ -21,8 +21,9 @@ import (
 
 // mockRepo 是 adminRepo.Repository 的最小可编程实现。
 //
-// Login 路径只触发 GetByUsername 与 Update；其余 CRUD 方法给 no-op 默认实现，
-// 保证编译期 adminRepo.Repository 接口满足（接口里其它方法也要在）。
+// Login 路径触发 GetByUsername + UpdateLoginFailure / UpdateLoginSuccess（定向列更新）；
+// Update 是哈希入口（管理页部分更新走它），Login MUST NOT 触发 —— 相关用例显式断言
+// updateCalls == 0。其余 CRUD 方法给 no-op 默认实现，保证编译期接口满足。
 type mockRepo struct {
 	getByUsernameFunc    func(c *gin.Context, username string) (*model.Admin, error)
 	updateFunc           func(c *gin.Context, entity *model.Admin) error
@@ -31,6 +32,9 @@ type mockRepo struct {
 	updateStatusFunc     func(c *gin.Context, id uint, status int8) error
 	resetLoginFailureFunc func(c *gin.Context, id uint) error
 	deleteBatchFunc      func(c *gin.Context, ids []uint) error
+
+	updateLoginFailureFunc func(c *gin.Context, id uint, failure int, locked bool) error
+	updateLoginSuccessFunc func(c *gin.Context, id uint, ip string, at time.Time) error
 
 	updateCalls    int
 	lastUpdate     *model.Admin
@@ -46,6 +50,16 @@ type mockRepo struct {
 	lastResetID   uint
 	deleteBatchCalls int
 	lastDeleteBatch []uint
+
+	updateLoginFailureCalls int
+	lastLoginFailureID      uint
+	lastLoginFailure        int
+	lastLocked              bool
+
+	updateLoginSuccessCalls int
+	lastLoginSuccessID      uint
+	lastLoginSuccessIP      string
+	lastLoginSuccessAt      time.Time
 }
 
 func (m *mockRepo) GetByUsername(c *gin.Context, username string) (*model.Admin, error) {
@@ -111,6 +125,29 @@ func (m *mockRepo) DeleteBatch(c *gin.Context, ids []uint) error {
 	m.lastDeleteBatch = ids
 	if m.deleteBatchFunc != nil {
 		return m.deleteBatchFunc(c, ids)
+	}
+	return nil
+}
+
+// Login 路径 2 个定向列更新方法的 mock 实现。
+func (m *mockRepo) UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error {
+	m.updateLoginFailureCalls++
+	m.lastLoginFailureID = id
+	m.lastLoginFailure = failure
+	m.lastLocked = locked
+	if m.updateLoginFailureFunc != nil {
+		return m.updateLoginFailureFunc(c, id, failure, locked)
+	}
+	return nil
+}
+
+func (m *mockRepo) UpdateLoginSuccess(c *gin.Context, id uint, ip string, at time.Time) error {
+	m.updateLoginSuccessCalls++
+	m.lastLoginSuccessID = id
+	m.lastLoginSuccessIP = ip
+	m.lastLoginSuccessAt = at
+	if m.updateLoginSuccessFunc != nil {
+		return m.updateLoginSuccessFunc(c, id, ip, at)
 	}
 	return nil
 }
@@ -293,12 +330,19 @@ func TestLogin_WrongPassword(t *testing.T) {
 	if iss.createCalls != 0 {
 		t.Errorf("issuer.Create called %d times on wrong password, want 0", iss.createCalls)
 	}
-	// 失败计数递增：Update 应被调一次，且 LoginFailure == 1
-	if repo.updateCalls != 1 {
-		t.Errorf("repo.Update called %d times, want 1", repo.updateCalls)
+	// 失败计数递增：走定向列更新 UpdateLoginFailure（非 Update），LoginFailure == 1、未触锁
+	if repo.updateLoginFailureCalls != 1 {
+		t.Errorf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
 	}
-	if repo.lastUpdate == nil || repo.lastUpdate.LoginFailure != 1 {
-		t.Errorf("repo.Update should set LoginFailure=1, got %+v", repo.lastUpdate)
+	if repo.lastLoginFailure != 1 {
+		t.Errorf("repo.UpdateLoginFailure failure = %d, want 1", repo.lastLoginFailure)
+	}
+	if repo.lastLocked {
+		t.Errorf("repo.UpdateLoginFailure locked = true, want false (below threshold)")
+	}
+	// 回归（P0 fix-admin-login-password-rehash）：Login 不得触碰通用 Update（哈希入口）。
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times on wrong password, want 0", repo.updateCalls)
 	}
 }
 
@@ -332,17 +376,18 @@ func TestLogin_WrongPassword_LocksAtThreshold(t *testing.T) {
 	if iss.createCalls != 0 {
 		t.Errorf("issuer.Create called %d times on invalid creds, want 0", iss.createCalls)
 	}
-	if repo.updateCalls != 1 {
-		t.Fatalf("repo.Update called %d times, want 1", repo.updateCalls)
+	if repo.updateLoginFailureCalls != 1 {
+		t.Fatalf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
 	}
-	if repo.lastUpdate == nil {
-		t.Fatal("repo.lastUpdate is nil after Update")
+	if repo.lastLoginFailure != MaxLoginFailure {
+		t.Errorf("repo.UpdateLoginFailure failure = %d, want %d", repo.lastLoginFailure, MaxLoginFailure)
 	}
-	if repo.lastUpdate.LoginFailure != MaxLoginFailure {
-		t.Errorf("repo.lastUpdate.LoginFailure = %d, want %d", repo.lastUpdate.LoginFailure, MaxLoginFailure)
+	if !repo.lastLocked {
+		t.Errorf("repo.UpdateLoginFailure locked = false, want true (at threshold)")
 	}
-	if repo.lastUpdate.Status != 0 {
-		t.Errorf("repo.lastUpdate.Status = %d, want 0 (locked)", repo.lastUpdate.Status)
+	// 回归（P0 fix-admin-login-password-rehash）：锁定路径同样不得触碰通用 Update。
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times on lockout, want 0", repo.updateCalls)
 	}
 	// N2: 锁定同步触发 token 吊销。
 	if iss.clearCalls != 1 {
@@ -380,8 +425,12 @@ func TestLogin_WrongPassword_BelowThreshold_NoClear(t *testing.T) {
 	if iss.clearCalls != 0 {
 		t.Errorf("issuer.Clear called %d times below threshold, want 0", iss.clearCalls)
 	}
-	if repo.lastUpdate == nil || repo.lastUpdate.Status != 1 {
-		t.Errorf("repo.Update should keep Status=1 below threshold, got %+v", repo.lastUpdate)
+	if repo.lastLocked {
+		t.Errorf("repo.UpdateLoginFailure locked = true below threshold, want false")
+	}
+	// 回归（P0 fix-admin-login-password-rehash）：未触锁路径也不得触碰通用 Update。
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times below threshold, want 0", repo.updateCalls)
 	}
 }
 
@@ -435,17 +484,22 @@ func TestLogin_Success_ResetsLoginFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login = %v, want nil", err)
 	}
-	if repo.updateCalls < 1 {
-		t.Fatalf("repo.Update called %d times, want >=1", repo.updateCalls)
+	// 成功记账走定向列更新 UpdateLoginSuccess：login_failure 清零 + last_login_* 三列一次写。
+	if repo.updateLoginSuccessCalls != 1 {
+		t.Fatalf("repo.UpdateLoginSuccess called %d times, want 1", repo.updateLoginSuccessCalls)
 	}
-	if repo.lastUpdate == nil {
-		t.Fatal("repo.lastUpdate is nil after Update")
+	if repo.lastLoginSuccessID != uint(adm.ID) {
+		t.Errorf("repo.UpdateLoginSuccess id = %d, want %d", repo.lastLoginSuccessID, adm.ID)
 	}
-	if repo.lastUpdate.LoginFailure != 0 {
-		t.Errorf("repo.lastUpdate.LoginFailure = %d, want 0 (reset on success)", repo.lastUpdate.LoginFailure)
+	if repo.lastLoginSuccessIP == "" {
+		t.Errorf("repo.UpdateLoginSuccess ip is empty, want client ip")
 	}
-	if repo.lastUpdate.Status != 1 {
-		t.Errorf("repo.lastUpdate.Status = %d, want 1 (unchanged on success)", repo.lastUpdate.Status)
+	if repo.lastLoginSuccessAt.IsZero() {
+		t.Errorf("repo.UpdateLoginSuccess at is zero, want now")
+	}
+	// 回归（P0 fix-admin-login-password-rehash）：成功路径不得触碰通用 Update（哈希入口）。
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times on success, want 0", repo.updateCalls)
 	}
 }
 
@@ -575,10 +629,57 @@ func TestLogin_TokenCreateFails(t *testing.T) {
 	if gotAdm != nil || tok != "" {
 		t.Errorf("Login returned non-zero on token.Create failure, got (%+v, %q)", gotAdm, tok)
 	}
-	// admin Update 已经被调一次（写 LastLoginAt 等），这是已知折中
-	if repo.updateCalls != 1 {
-		t.Errorf("repo.Update called %d times, want 1", repo.updateCalls)
+	// 成功记账已先行落库（UpdateLoginSuccess 定向更新）；Update（哈希入口）依旧零调用。
+	if repo.updateLoginSuccessCalls != 1 {
+		t.Errorf("repo.UpdateLoginSuccess called %d times, want 1", repo.updateLoginSuccessCalls)
 	}
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times, want 0", repo.updateCalls)
+	}
+}
+
+// TestLogin_NeverTouchesPasswordHash 回归 P0（fix-admin-login-password-rehash）：
+// Login 的成功与失败两条路径都必须走定向列更新，绝不能把从 DB 读出的完整模型
+// （Password 为哈希串）交给具备"非空即 bcrypt"语义的通用 Update —— 否则哈希被
+// 二次哈希，正确密码在任意一次登录尝试后永久失效。两条路径各自断言 updateCalls == 0。
+func TestLogin_NeverTouchesPasswordHash(t *testing.T) {
+	t.Run("wrong password path", func(t *testing.T) {
+		adm := newTestAdmin(t)
+		repo := &mockRepo{
+			getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+				return adm, nil
+			},
+		}
+		svc := newService(repo, &mockIssuer{}, &mockCaptcha{})
+		_, _, _ = svc.Login(newTestContext(), testUsername, "wrong-password", "cap-key", testPoints, false)
+
+		if repo.updateCalls != 0 {
+			t.Errorf("repo.Update called %d times on wrong-password path, want 0", repo.updateCalls)
+		}
+		if repo.updateLoginFailureCalls != 1 {
+			t.Errorf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
+		}
+	})
+
+	t.Run("success path", func(t *testing.T) {
+		adm := newTestAdmin(t)
+		repo := &mockRepo{
+			getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
+				return adm, nil
+			},
+		}
+		svc := newService(repo, &mockIssuer{}, &mockCaptcha{})
+		if _, _, err := svc.Login(newTestContext(), testUsername, testPassword, "cap-key", testPoints, false); err != nil {
+			t.Fatalf("Login = %v, want nil", err)
+		}
+
+		if repo.updateCalls != 0 {
+			t.Errorf("repo.Update called %d times on success path, want 0", repo.updateCalls)
+		}
+		if repo.updateLoginSuccessCalls != 1 {
+			t.Errorf("repo.UpdateLoginSuccess called %d times, want 1", repo.updateLoginSuccessCalls)
+		}
+	})
 }
 
 // TestLogin_CaptchaFailed_ShortCircuits 验证 captcha 二次校验失败时立即返回 ErrInvalidCaptcha，
