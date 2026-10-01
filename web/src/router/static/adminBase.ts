@@ -29,6 +29,18 @@ const adminBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 后台主页（登录后 landing）：欢迎语 + KPI 视图。
+            // 静态子路由，不依赖后端菜单 —— init 流程跳转目标就是它（见 layouts/admin/index.vue）。
+            // 必须放在 :path(.*)* 兜底路由之前，vue-router 才能优先命中。
+            path: 'dashboard',
+            name: 'adminDashboard',
+            component: () => import('/@/views/admin/dashboard.vue'),
+            meta: {
+                title: 'pageTitles.Dashboard',
+                noAuth: false,
+            },
+        },
+        {
             // 静态子路由：agUpload 组件测试页（不走后端动态菜单加载）
             // 必须放在 :path(.*)* 兜底路由之前，vue-router 才能优先命中。
             path: 'agInput',
