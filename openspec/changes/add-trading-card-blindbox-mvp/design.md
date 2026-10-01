@@ -50,13 +50,14 @@ MVP 目标：在「概率公示 + 随机抽取 + 多供应商入驻 + 限时特�
 
 为什么：身份业务边界清晰、token 互不干扰，复用现有 token infra（不切换 driver）。
 
-### D2：数据模型 15 张表（13 新 + 2 扩展）
+### D2：数据模型 16 张表（14 新 + 2 扩展）
 
 | 表 | 用途 | 关键字段 |
 |---|---|---|
 | `mall_users`（扩展 user） | C 端会员 | nickname / avatar / status / balance / password_hash |
 | `mall_suppliers`（扩展） | 供应商主体 | name / logo / bio / status(active\|disabled) / is_featured / contact_phone / balance / total_sales / commission_rate |
 | `mall_supplier_users` | 供应商登录账号 | supplier_id / username / password_hash / status |
+| `mall_user_follow_supplier` | 用户关注供应商关系 | user_id / supplier_id / created_at / deleted_at |
 | `mall_cards` | 卡牌主数据 | name / image / team / player / serial_no / description |
 | `mall_blind_boxes` | 盲盒 SKU | supplier_id(FK, NOT NULL) / name / cover / price / status / on_sale / is_featured |
 | `mall_card_pools` | 卡池（1:1 绑定盲盒） | blind_box_id(UK) |
@@ -69,7 +70,6 @@ MVP 目标：在「概率公示 + 随机抽取 + 多供应商入驻 + 限时特�
 | `mall_platform_ledger` | 平台收入台账（counter 聚合） | counter_key(PK) / amount |
 | `mall_seckill_activities` | 秒杀活动主体 | supplier_id / blind_box_id / seckill_price / total_stock / per_user_limit / start_at / end_at / status / redis_initialized |
 | `mall_stock_deduction_log` | 秒杀扣减记录 | seckill_id / user_id / blind_box_id / card_id / rarity / snapshot_name / snapshot_image / deducted_at / synced_to_pool_at |
-| `mall_user_follow_supplier` | 用户关注供应商关系 | user_id / supplier_id / created_at / deleted_at |
 
 关键约束：
 - `mall_blind_boxes.supplier_id` 强制 NOT NULL（纯多供应商模式，平台不自营）
@@ -938,7 +938,7 @@ data, err := hotspot.Get(ctx, "hotspot:blindbox:1",
 - 第一个请求查 DB，其他请求等待结果复用
 - 典型场景：缓存重启后瞬时高并发
 
-### D23：缓存预热 + TTL 随机抖动
+### D22：缓存预热 + TTL 随机抖动
 
 **业务动机**：
 - 限时特价 / 秒杀活动开始瞬间，会有大量请求涌入

@@ -7,20 +7,20 @@
 - [ ] 1.3 新增迁移 `000008_mall_blind_boxes.{up,down}.sql`：建 mall_cards + mall_blind_boxes + mall_card_pools + mall_card_pool_items，索引 `(supplier_id, status, on_sale)`, `(is_featured, status, on_sale)`, `mall_card_pools(blind_box_id) UK`, `mall_card_pool_items(pool_id, stock)`
 - [ ] 1.4 新增迁移 `000009_mall_draw_orders.{up,down}.sql`：建 mall_draw_orders + mall_draw_order_items，索引 `(user_id, created_at DESC)`, `(order_no) UK`, `mall_draw_order_items(order_id)`
 - [ ] 1.5 新增迁移 `000010_mall_promotions.{up,down}.sql`：建 mall_promotions，索引 `(blind_box_id, start_at) UK`, `(status, end_at)`
-- [ ] 1.5a 新增迁移 `000011_mall_settlement.{up,down}.sql`：
+- [ ] 1.6 新增迁移 `000011_mall_settlement.{up,down}.sql`：
   - 扩展 `mall_suppliers` 加 `balance` / `total_sales` / `commission_rate` 字段
   - 建 `mall_settlements`，索引 `(supplier_id, period_start, period_end) UK`, `(status, created_at)`
   - 建 `mall_settlement_items`，索引 `(settlement_id)`, `(draw_order_id) UK`
   - 建 `mall_platform_ledger`（counter_key 主键）
   - 初始化 `mall_platform_ledger` seed：`('total_revenue', 0)`、`('total_commission', 0)`
   - 初始化 `config.yaml` 加 `default_commission_rate: 0.1000`
-- [ ] 1.6 在 `internal/model/` 新建子包 `mall/`，按表拆分 model 文件（每个实体一文件，遵循 admin.go 风格：comment 优先 + 业务字段在前 + 时间戳收尾）
-- [ ] 1.7 扩展 `internal/model/user.go` 为 mall_users 结构（保持 Register 在 init 中）
-- [ ] 1.8 新增 `config/cache.yaml` + `config/search.yaml`，更新 `config/.env.yaml.example`
-- [ ] 1.9 新增 `internal/infra/cache/cache.go`：定义 `Cache` 接口（Get/Set/Del/SetNX），新增 `redis.go` 实现（用 `github.com/redis/go-redis/v9`），新增 `Init()` 全局初始化函数（fail fast）
-- [ ] 1.10 新增 `internal/infra/search/search.go`：定义 `SearchClient` 接口（Index/BulkIndex/Delete/Search），新增 `es.go` 实现（用 `github.com/elastic/go-elasticsearch/v8`），新增 `Init()` fail fast
-- [ ] 1.11 扩展 `cmd/serve/main.go`：在 `database.Init()` 之后调 `cache.Init()` + `search.Init()`
-- [ ] 1.12 扩展 `cmd/seed/`：补充种子数据（3 个供应商 + 6 个 supplier_users + 30 张 cards + 6 个盲盒 + 卡池 items + 2 个活跃活动）
+- [ ] 1.7 在 `internal/model/` 新建子包 `mall/`，按表拆分 model 文件（每个实体一文件，遵循 admin.go 风格：comment 优先 + 业务字段在前 + 时间戳收尾）
+- [ ] 1.8 扩展 `internal/model/user.go` 为 mall_users 结构（保持 Register 在 init 中）
+- [ ] 1.9 新增 `config/cache.yaml` + `config/search.yaml`，更新 `config/.env.yaml.example`
+- [ ] 1.10 新增 `internal/infra/cache/cache.go`：定义 `Cache` 接口（Get/Set/Del/SetNX），新增 `redis.go` 实现（用 `github.com/redis/go-redis/v9`），新增 `Init()` 全局初始化函数（fail fast）
+- [ ] 1.11 新增 `internal/infra/search/search.go`：定义 `SearchClient` 接口（Index/BulkIndex/Delete/Search），新增 `es.go` 实现（用 `github.com/elastic/go-elasticsearch/v8`），新增 `Init()` fail fast
+- [ ] 1.12 扩展 `cmd/serve/main.go`：在 `database.Init()` 之后调 `cache.Init()` + `search.Init()`
+- [ ] 1.13 扩展 `cmd/seed/`：补充种子数据（3 个供应商 + 6 个 supplier_users + 30 张 cards + 6 个盲盒 + 卡池 items + 2 个活跃活动）
 
 ## 2. Repository 层（所有身份）
 
@@ -48,15 +48,15 @@
 - [ ] 4.2 `internal/middleware/auth.go`：扩展现有 AdminAuth 模式，新增 `UserAuth` + `SupplierAuth`，按 token type 区分
 - [ ] 4.3 `internal/handler/user/auth.go`：Login HTTP 处理（错误码映射）
 - [ ] 4.4 `internal/handler/user/blindbox.go`：List + Detail
-- [ ] 4.4 `internal/handler/user/draw.go`：Draw（套 RateLimitPerMinute + UserAuth）
-- [ ] 4.5 `internal/handler/user/order.go`：List + Detail
-- [ ] 4.6 `internal/handler/user/home.go`：Feed
-- [ ] 4.7 `internal/handler/supplier/auth.go` + `product.go` + `promotion.go`：对应 service 暴露 HTTP
-- [ ] 4.8 `internal/handler/admin/supplier.go` + `blindbox.go`：admin 端管理
-- [ ] 4.9 `internal/router/user/router.go`：注册 7 个路由（含中间件）
-- [ ] 4.10 `internal/router/supplier/router.go`：注册 9 个路由
-- [ ] 4.11 `internal/router/admin/router.go`：扩展注册 supplier/blindbox/promotion/settlement 管理路由
-- [ ] 4.12 新增迁移 `000012_admin_rule_mall_menu.{up,down}.sql`：在 admin_rule 表插入 supplier / blindbox / promotion / settlement 四组管理菜单的种子规则
+- [ ] 4.5 `internal/handler/user/draw.go`：Draw（套 RateLimitPerMinute + UserAuth）
+- [ ] 4.6 `internal/handler/user/order.go`：List + Detail
+- [ ] 4.7 `internal/handler/user/home.go`：Feed
+- [ ] 4.8 `internal/handler/supplier/auth.go` + `product.go` + `promotion.go`：对应 service 暴露 HTTP
+- [ ] 4.9 `internal/handler/admin/supplier.go` + `blindbox.go`：admin 端管理
+- [ ] 4.10 `internal/router/user/router.go`：注册 7 个路由（含中间件）
+- [ ] 4.11 `internal/router/supplier/router.go`：注册 9 个路由
+- [ ] 4.12 `internal/router/admin/router.go`：扩展注册 supplier/blindbox/promotion/settlement 管理路由
+- [ ] 4.13 新增迁移 `000014_admin_rule_mall_menu.{up,down}.sql`：在 admin_rule 表插入 supplier / blindbox / promotion / seckill / settlement / follow 六组管理菜单的种子规则（必须在 000013 follow_supplier 之后）
 
 ## 5. cmd/es-sync 全量同步脚本
 
@@ -212,7 +212,7 @@
 - [ ] 17.7 集成测试：1000 并发请求 NotFound key → DB 只被打 1 次；30s 后占位过期，loader 重新查 DB
 - [ ] 17.8 集成测试：admin 创建新 blind_box 后 hotspot.Invalidate → 下次读触发冷启动加载真实数据（不会被 NotFound 占位误导）
 
-## 18. 缓存预热 + TTL 抖动（对应 D23）
+## 18. 缓存预热 + TTL 抖动（对应 D22）
 
 - [ ] 18.1 新增迁移 `000013_mall_user_follow_supplier.{up,down}.sql`：建 mall_user_follow_supplier 表，唯一索引 `(user_id, supplier_id)`
 - [ ] 18.2 新增 model：`MallUserFollowSupplier`

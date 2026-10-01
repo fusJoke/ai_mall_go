@@ -12,9 +12,10 @@
 
 - 扩展现有 `model.User` 为 `mall_users`（加 `nickname` / `avatar` / `status` / `balance` / `password_hash`）
 - 扩展 `mall_suppliers` 加结算字段（`balance` / `total_sales` / `commission_rate`）
-- 新增 13 张表（详见 `design.md` D2）：
+- 新增 14 张表（详见 `design.md` D2）：
   - `mall_suppliers`（含 `balance` / `total_sales` / `commission_rate` 结算字段）
   - `mall_supplier_users` 供应商登录账号
+  - `mall_user_follow_supplier` 用户关注供应商关系
   - `mall_cards` 卡牌主数据
   - `mall_blind_boxes` 盲盒 SKU（FK supplier_id，强制非空）
   - `mall_card_pools` 卡池（1:1 绑定盲盒）
@@ -44,7 +45,7 @@
 - 新增 `cmd/es-sync/`：全量把 MySQL「推荐 + 在售」数据同步到 ES
 - 扩展 `cmd/seed/`：补充供应商 / 卡牌 / 盲盒 / 活动 / 秒杀种子数据
 - 新增 `cmd/stock-sync/`：秒杀扣减记录异步对账脚本（消费者模式 + cron 兜底）
-- 扩展 `cmd/migrate/migrations/`：新增 7 个迁移文件（000006-000012）
+- 扩展 `cmd/migrate/migrations/`：新增 8 个迁移文件（000006-000013）
 
 ### 前端
 
@@ -71,7 +72,7 @@
 
 ### New Capabilities
 
-- `trading-card-blindbox-mvp`：球星卡盲盒商城 MVP，14 张表、3 套接口、ES 推荐、两层缓存、活动价、秒杀、限流、结算。
+- `trading-card-blindbox-mvp`：球星卡盲盒商城 MVP，16 张表、3 套接口、ES 推荐、两层缓存、活动价、秒杀、限流、结算。
 - `mall-cache-multi-level`：两层缓存架构（L1 进程内 5-30s + L2 Redis 5min+ + L3 MySQL），自动回填与反向失效。
 - `mall-search-es`：推荐层（ES），离线全量脚本同步，应用只读。
 - `mall-rate-limit`：抽卡接口限流（Redis SetNX + TTL，不走 L1）。
@@ -88,12 +89,12 @@
 ## Impact
 
 - **后端代码**：约 50 个新文件、3 个目录族（user/supplier/admin-extension），总代码量估算 5500-6500 行
-- **数据库**：新增 13 张表 + 扩展 2 张表（users + suppliers）+ 7 个迁移文件（000006-000012）+ seed 数据扩展
+- **数据库**：新增 14 张表 + 扩展 2 张表（users + suppliers）+ 8 个迁移文件（000006-000013）+ seed 数据扩展
 - **依赖**：新增 `github.com/redis/go-redis/v9`、`github.com/elastic/go-elasticsearch/v8`、`github.com/patrickmn/go-cache/v2`
 - **基础设施**：本地环境需提供 Redis 与 Elasticsearch（应用启动期连接，fail fast）
 - **测试**：每个新 service 配单测；抽卡接口事务并发安全要做集成测试（用真实 MySQL）；秒杀并发测试用真实 Redis + MySQL
 - **前端**：约 11 个新页面 + 2 个 layout + 多个 i18n key
-- **权限**：admin 后台新增 supplier / blindbox / promotion / seckill / settlement 五组管理规则，需在 migration 000013 落地 admin_rule 种子
+- **权限**：admin 后台新增 supplier / blindbox / promotion / seckill / settlement / follow 六组管理规则，需在 migration 000014 落地 admin_rule 种子
 
 ## Out of Scope（非目标）
 
