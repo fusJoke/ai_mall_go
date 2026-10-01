@@ -524,6 +524,383 @@ go func() {
 - 未来加 Kafka：新建 `internal/infra/mq/kafka.go`，实现 MQ 接口，config.yaml 加 `mq.driver: kafka`
 - 业务代码不变（通过 interface 调用）
 
+### D18：第三方渠道对接——适配器 + 工厂模式
+
+**业务动机**：
+- MVP 阶段抽卡"模拟支付"、结算"手动 mark_paid"
+- 未来对接真实支付（微信 / 支付宝）、真实银行打款 API、短信下发
+- 通过适配器接口 + 工厂模式解耦业务代码与具体 driver
+
+**抽象层**：
+```
+internal/infra/channel/
+  ├── channel.go       Channel 接口：Pay / Payout / Notify
+  ├── factory.go       ChannelFactory.Create(name string) Channel
+  ├── mock.go          Mock 实现（记录调用日志，返回成功）— MVP 默认
+  ├── bank.go          银行打款实现（MVP 占位 = Mock）
+  └── wechat.go        微信支付实现（未来）
+```
+
+**接口定义**：
+```go
+type Channel interface {
+    Pay(ctx context.Context, req *PayRequest) (*PayResult, error)
+    Payout(ctx context.Context, req *PayoutRequest) (*PayoutResult, error)
+    Notify(ctx context.Context, req *NotifyRequest) error
+}
+
+type ChannelFactory interface {
+    Create(name string) (Channel, error)  // name = "payment" / "bank" / "sms"
+}
+```
+
+**工厂注册表**：
+```go
+var drivers = map[string]func() Channel{
+    "mock":   NewMockChannel,
+    "bank":   NewBankChannel,
+    "wechat": NewWechatChannel,  // 未来
+    "alipay": NewAlipayChannel,  // 未来
+}
+
+func (f *channelFactory) Create(name string) (Channel, error) {
+    factory, ok := drivers[name]
+    if !ok {
+        return nil, ErrUnknownChannel
+    }
+    return factory(), nil
+}
+```
+
+**业务调用方式**：
+```go
+// 抽卡 service（未来真实支付）
+factory.Create("payment").Pay(ctx, &PayRequest{
+    UserID: uid, Amount: actualPrice, OrderNo: orderNo,
+})
+
+// 结算 service（未来真实打款）
+factory.Create("bank").Payout(ctx, &PayoutRequest{
+    SupplierID: sid, Amount: payoutAmount, SettlementID: sid,
+})
+```
+
+**配置**：
+```yaml
+# config/channel.yaml
+channel:
+  payment: mock        # 未来: wechat / alipay
+  bank:    mock        # 未来: real bank API
+  sms:     mock        # 未来: aliyun sms / tencent cloud
+```
+
+**为什么用工厂而不是直接注入 Channel**：
+- 业务 service 可能有多个调用点（抽卡 / 结算 / 短信），需要按 name 选择
+- 工厂集中管理 driver 注册表，避免每个 service 重复注入
+
+**MVP 不做的事**：
+- ❌ 真实支付（依然模拟支付）
+- ❌ 真实银行 API（依然手动 mark_paid）
+- ❌ 真实短信（依然固定密码登录）
+- ❌ channel 单元测试覆盖（mock 实现是 trivial，不需要测）
+
+### D19：订单状态机——状态模式
+
+**业务对象**：
+- `mall_draw_orders.status`：pending → paid → drawn（/ failed）
+- `mall_settlements.status`：pending → processing → paid（/ failed）
+
+**为什么用状态模式而不是 switch/case**：
+- 状态转换规则集中管理（白名单），不易遗漏非法转换
+- 每个状态独立可测（不依赖其他状态）
+- 新增状态不动现有代码（开闭原则）
+
+**抽象层**：
+```
+internal/domain/state/
+  ├── state.go             State 接口 + OrderContext 接口
+  ├── draw_order_state.go  抽卡订单：PendingState / PaidState / DrawnState / FailedState
+  └── settlement_state.go  结算单：PendingState / ProcessingState / PaidState / FailedState
+```
+
+**State 接口**：
+```go
+type State interface {
+    Name() string
+    // CanTransitionTo 检查目标状态是否合法（白名单）
+    CanTransitionTo(target State) bool
+    // OnEnter 进入该状态时触发的副作用（hook）
+    OnEnter(ctx context.Context, order OrderContext) error
+}
+
+type OrderContext interface {
+    OrderID() int64
+    CurrentState() string
+    UpdateState(stateName string) error  // 持久化到 DB
+}
+```
+
+**状态机示例（抽卡订单）**：
+```go
+// legalTransitions 定义合法转换
+var drawOrderTransitions = map[string][]string{
+    "pending": {"paid", "failed"},
+    "paid":    {"drawn", "failed"},
+    "drawn":   {},  // 终态
+    "failed":  {},  // 终态
+}
+
+func (s *DrawOrderState) CanTransitionTo(target State) bool {
+    allowed, ok := drawOrderTransitions[s.Name()]
+    if !ok { return false }
+    for _, name := range allowed {
+        if name == target.Name() { return true }
+    }
+    return false
+}
+```
+
+**业务用法**：
+```go
+// 抽卡事务成功后
+order.SetState(state.NewPaidState())
+if err := order.Persist(); err != nil { return err }
+
+// 抽中卡片后（事务内）
+if !order.CanTransitionTo(state.NewDrawnState()) {
+    return ErrInvalidStateTransition
+}
+order.SetState(state.NewDrawnState())
+order.Persist()
+```
+
+**状态机的副作用 hook**：
+- 进入 `PaidState` 时：发 MQ 消息 + 触发结算待结算金额更新（已经在事务内的不用重复）
+- 进入 `DrawnState` 时：发抽卡成功通知（未来）
+- 进入 `FailedState` 时：Redis 库存回滚（如果是秒杀路径）
+
+**为什么把状态机抽到 domain/state 包**：
+- 跨多个 service 复用（user.draw / admin.settlement）
+- 状态转换规则集中定义，避免分散在 service 各处
+
+**MVP 状态机覆盖范围**：
+- ✅ 抽卡订单：pending → paid → drawn，failed 兜底
+- ✅ 结算单：pending → processing → paid，failed 兜底
+- ✅ 转换合法性校验（白名单）
+- ✅ OnEnter hook（MVP 只记日志）
+- ❌ 状态转换历史表（审计追溯）— YAGNI
+- ❌ 状态超时自动转换（pending → failed 超时）— YAGNI
+
+### D20：下单入口校验——责任链模式
+
+**业务场景**：下单前多个校验环节按顺序执行，任一失败立即终止返回错误。
+
+**校验环节（MVP）**：
+
+| 序号 | Check | 失败错误 |
+|---|---|---|
+| 1 | UserActiveCheck | 用户被禁用 → ErrUserDisabled |
+| 2 | BlindBoxBuyableCheck | 盲盒下架 / 供应商 disabled → ErrBlindBoxNotBuyable |
+| 3 | TimeWindowCheck | 活动未开始 / 已结束 / 非活动期 → ErrNotInTimeWindow |
+| 4 | UserLimitCheck（秒杀） | 用户已购 ≥ per_user_limit → ErrUserLimitExceeded |
+| 5 | BalanceCheck | 余额 < actual_price → ErrInsufficientBalance |
+
+**抽卡 Chain**：
+```
+DrawChain = UserActive → BlindBoxBuyable → TimeWindow → Balance
+SeckillDrawChain = UserActive → BlindBoxBuyable → TimeWindow → UserLimit → Balance
+```
+
+**抽象层**：
+```
+internal/domain/chain/
+  ├── validator.go    Validator 接口
+  └── chain.go        Chain 编排（顺序执行，任一 err 终止）
+
+internal/service/user/draw_check/
+  ├── user_active_check.go
+  ├── blindbox_buyable_check.go
+  ├── time_window_check.go
+  ├── user_limit_check.go
+  └── balance_check.go
+```
+
+**接口定义**：
+```go
+type Validator interface {
+    Name() string
+    Validate(ctx context.Context, input *DrawInput) error
+}
+
+type Chain struct {
+    validators []Validator
+}
+
+func (c *Chain) Validate(ctx context.Context, input *DrawInput) error {
+    for _, v := range c.validators {
+        if err := v.Validate(ctx, input); err != nil {
+            return fmt.Errorf("%s: %w", v.Name(), err)
+        }
+    }
+    return nil
+}
+```
+
+**业务用法（抽卡 service）**：
+```go
+func (s *drawService) Draw(ctx context.Context, input *DrawInput) (*DrawResult, error) {
+    // 1. 校验链（事务外）
+    if err := s.drawChain.Validate(ctx, input); err != nil {
+        return nil, err
+    }
+    
+    // 2. 进入事务
+    return s.tx.Do(ctx, func(tx *gorm.DB) (*DrawResult, error) {
+        // ... D3 抽卡算法 ...
+    })
+}
+```
+
+**为什么把校验放在事务外**：
+- 校验失败不应持有 DB 连接（事务开启有性能成本）
+- 校验失败的错误是业务错误，不是 DB 错误，事务内无意义
+- 事务内只做"必须真值"的扣库存 / 扣余额操作
+
+**Redis 限购放在校验链 vs 事务内**：
+- 校验链（推荐）：UserLimitCheck 用 Redis INCR + 比较 pre_user_limit，失败立即终止
+- 事务内：失败要回滚事务，浪费 DB 资源
+- 选校验链：失败 fast，不进事务
+
+**Chain 与 Service 的关系**：
+- Chain 是 Service 的私有字段（service 启动时组装）
+- Chain 本身不调 Repository，只调 Service / Cache / MQ
+- 每个 Validator 独立可测（注入 mock）
+
+**为什么用责任链而不是一个大 Validate 函数**：
+- 每个 Check 独立可测（单测覆盖）
+- Check 顺序可配置（不同业务路径挂不同 Chain）
+- 新增 Check 不动现有代码（开闭原则）
+
+**未来可加的 Check（不在 MVP）**：
+- RiskCheck（黑名单 / IP 频率）
+- DeviceCheck（设备指纹）
+- GeoCheck（地域限制）
+
+### D21：Redis 热点数据缓存——不过期 + 逻辑时间 + 分布式锁 + 异步更新
+
+**业务场景**：
+- 盲盒详情、首页 feed、限时特价活动等"高读低写"数据
+- 经典 Cache-Aside（miss → DB → 写 cache）模式下，每次 TTL 到期都会出现"雪崩"（多个请求同时 miss → 全部打 DB）
+- 用户要求：热点 key 永驻 Redis，用逻辑时间判断是否需要更新，抢锁后异步刷新，老请求直接返回老数据
+
+**核心算法**：
+```
+GetHotspot(ctx, key, staleAfter):
+  1. Redis.Get(key)  → val
+  2. if val == nil (首次冷启动)：
+       data = db.Query(key)
+       data.RefreshedAt = now
+       Redis.Set(key, data, TTL=0)  // 不过期
+       return data
+  3. data = parse(val)
+  4. if now - data.RefreshedAt > staleAfter (逻辑时间到期)：
+       if lock.TryAcquire("lock:"+key, TTL=5s):
+         go func() {  // 异步更新
+           defer lock.Release("lock:"+key)
+           newData = db.Query(key)
+           newData.RefreshedAt = now
+           Redis.Set(key, newData, TTL=0)  // 不过期
+         }()
+       // 不管抢没抢到锁，都返回老数据
+  5. return data  // 老数据返回
+```
+
+**抽象层**：
+```
+internal/infra/cache/hotspot/
+  ├── hotspot.go        HotspotCache 接口
+  ├── redis_hotspot.go  Redis 实现（含分布式锁）
+  └── doc.go            设计文档
+```
+
+**接口签名**：
+```go
+type HotspotLoader func(ctx context.Context, key string) (data any, err error)
+
+type HotspotCache interface {
+    Get(ctx context.Context, key string, loader HotspotLoader, staleAfter time.Duration) (data any, err error)
+    Invalidate(ctx context.Context, key string) error  // 主动失效
+}
+```
+
+**实现关键**：
+- 数据序列化：JSON + 含 `RefreshedAt` 时间戳
+- 分布式锁：`SET lock:{key} {uuid} NX EX 5`（SETNX + TTL）
+- 锁释放：用 Lua 脚本保证"只删自己的锁"（防误删）
+- 异步更新：`go func()` 不阻塞读路径
+
+**应用映射**：
+
+| Key 模式 | staleAfter | Loader | 用途 |
+|---|---|---|---|
+| `hotspot:blindbox:{id}` | 30s | 查 blind_box + 当前活动 | 热门盲盒详情 |
+| `hotspot:feed:home` | 60s | 走 ES 查首页 feed | 首页 feed |
+| `hotspot:promotion:{id}` | 10s | 查 promotion | 限时特价活动 |
+
+**业务用法**：
+```go
+// 抽卡 service / blindbox service 替换原来的 TTL 缓存调用
+data, err := hotspot.Get(ctx, "hotspot:blindbox:1", 
+    func(ctx, key) (any, error) {
+        return s.repo.GetBlindBoxDetail(ctx, extractID(key))
+    },
+    30*time.Second,
+)
+```
+
+**主动失效**：
+- 供应商编辑盲盒 → `hotspot.Invalidate(ctx, "hotspot:blindbox:{id}")` → Redis DEL
+- 下次读触发冷启动路径 → DB 查 → 写回
+- 注意：主动失效后第一次读是同步查 DB（不像异步）
+
+**为什么不完全替代 TTL 缓存**：
+- TTL 模式自动清理 → 防 OOM
+- Hotspot 永驻 → 需要手动管理容量
+- 未来加 LRU 淘汰策略时，两者可以共存（TTL 兜底 + Hotspot 热点）
+
+**冷启动保护**：
+- 完全 miss 时同步查 DB（不可避免）
+- 高并发下用 singleflight 合并请求（避免雪崩）
+- `golang.org/x/sync/singleflight` 提供 Do/DoChan
+
+**与其他缓存的关系**：
+```
+读路径：
+  1. Hotspot.Get(key)        ← 优先查热点
+     ↓ miss / 老数据
+  2. MultiLevelCache.Get     ← 普通 L1/L2 兜底
+     ↓ miss
+  3. DB                      ← 兜底
+
+写路径：
+  1. DB.Commit
+  2. Hotspot.Invalidate(key)  ← 主动失效热点
+  3. MultiLevelCache.Del(key) ← 主动失效 L1/L2
+```
+
+**MVP 落地范围**：
+- ✅ Hotspot 抽象 + Redis 实现 + singleflight 合并
+- ✅ 应用于盲盒详情（替换之前的 10min TTL）
+- ✅ 应用于首页 feed（替换之前的 5min TTL）
+- ❌ 限时特价活动（热度一般，先用 TTL）
+- ❌ LRU 淘汰策略（容量可控）
+- ❌ Redlock（单 Redis SETNX 足够）
+
+**为什么用 singleflight**：
+- 高并发下 Hotspot 完全 miss 时避免 N 个请求同时打 DB
+- 第一个请求查 DB，其他请求等待结果复用
+- 典型场景：缓存重启后瞬时高并发
+
 ## Architecture
 
 ```

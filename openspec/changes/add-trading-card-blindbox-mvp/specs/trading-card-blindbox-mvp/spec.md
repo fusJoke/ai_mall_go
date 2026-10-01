@@ -827,3 +827,180 @@ for {
 #### Scenario: Consumer + cron run together without conflict
 - **WHEN** consumer 已处理消息 + cron 扫到同一行
 - **THEN** consumer 的 UPDATE 在前；cron 扫到的是 synced_to_pool_at IS NOT NULL，UPDATE 影响行数=0，幂等无副作用
+
+---
+
+### Requirement: Third-party channel adapter and factory
+
+`internal/infra/channel/` SHALL 提供第三方渠道抽象：
+
+```go
+type Channel interface {
+    Pay(ctx context.Context, req *PayRequest) (*PayResult, error)
+    Payout(ctx context.Context, req *PayoutRequest) (*PayoutResult, error)
+    Notify(ctx context.Context, req *NotifyRequest) error
+}
+
+type ChannelFactory interface {
+    Create(name string) (Channel, error)  // name = "payment" / "bank" / "sms"
+}
+```
+
+MVP SHALL 仅实现 `mock` driver（返回成功 + 记录调用日志）。未来添加 wechat/alipay/real-bank driver 不动业务代码。
+
+config/channel.yaml 通过 `channel.payment: mock` 等字段指定每种渠道的 driver。
+
+#### Scenario: Factory returns mock channel
+- **WHEN** 业务代码调 `factory.Create("payment")`，config `channel.payment=mock`
+- **THEN** 返回 mock 实现；`Pay()` 返回 `PayResult{Status: "success"}`
+
+#### Scenario: Unknown channel name rejected
+- **WHEN** `factory.Create("unknown")` 调用
+- **THEN** 返回 `ErrUnknownChannel`（业务层处理为 500 + 错误日志）
+
+---
+
+### Requirement: Draw order state machine
+
+`internal/domain/state/` SHALL 提供抽卡订单状态机实现：
+
+| 当前状态 | 合法目标状态 |
+|---|---|
+| pending | paid, failed |
+| paid | drawn, failed |
+| drawn | （终态） |
+| failed | （终态） |
+
+State 接口 SHALL 包含 `Name()` / `CanTransitionTo(target)` / `OnEnter(ctx, order)` 三个方法。
+
+业务 service SHALL 在状态变更时调用 `state.Transition(newState)`，自动校验合法性 + 触发 OnEnter hook + 持久化到 DB。
+
+#### Scenario: Valid transition pending → paid
+- **WHEN** 抽卡事务成功，order 从 pending 转 paid
+- **THEN** `CanTransitionTo(PaidState)` 返回 true；`Transition(PaidState)` 成功；DB status='paid'
+
+#### Scenario: Invalid transition pending → drawn rejected
+- **WHEN** 抽卡事务中跳过 paid 直接转 drawn
+- **THEN** `CanTransitionTo(DrawnState)` 返回 false；返回 `ErrInvalidStateTransition` (HTTP 409)
+
+#### Scenario: Terminal state cannot transition
+- **WHEN** order.status='drawn'（终态）
+- **THEN** 任何 `Transition(...)` 调用返回 `ErrInvalidStateTransition`
+
+---
+
+### Requirement: Settlement order state machine
+
+结算单状态机 SHALL 按下表规则：
+
+| 当前状态 | 合法目标状态 |
+|---|---|
+| pending | processing, failed |
+| processing | paid, failed |
+| paid | （终态） |
+| failed | （终态） |
+
+#### Scenario: Valid transition pending → processing
+- **WHEN** admin 生成结算单（status='pending'）后开始处理
+- **THEN** Transition(ProcessingState) 成功；DB status='processing'
+
+#### Scenario: Valid transition processing → paid
+- **WHEN** admin mark_paid 完成
+- **THEN** Transition(PaidState) 成功；DB status='paid'；supplier balance 扣减
+
+---
+
+### Requirement: Draw validation chain (responsibility chain)
+
+`internal/domain/chain/` SHALL 提供责任链编排：
+
+```go
+type Validator interface {
+    Name() string
+    Validate(ctx context.Context, input *DrawInput) error
+}
+
+type Chain struct{ validators []Validator }
+
+func (c *Chain) Validate(ctx, input) error  // 顺序执行，任一 err 终止
+```
+
+MVP SHALL 提供以下 Validator：
+
+| Validator | 检查项 | 失败错误码 |
+|---|---|---|
+| UserActiveCheck | mall_users.status=1 | ErrUserDisabled (403) |
+| BlindBoxBuyableCheck | blind_box.status=active AND on_sale AND supplier.status=active | ErrBlindBoxNotBuyable (404) |
+| TimeWindowCheck | 普通活动 NOW() IN [start_at, end_at) / 秒杀活动同理 | ErrNotInTimeWindow (409) |
+| UserLimitCheck（秒杀） | Redis INCR seckill:user_bought <= per_user_limit | ErrUserLimitExceeded (429) |
+| BalanceCheck | user.balance >= actual_price | ErrInsufficientBalance (402) |
+
+Chain SHALL 在事务外执行（不进事务），校验失败 fast return 不浪费 DB 连接。
+
+#### Scenario: All checks pass
+- **WHEN** 抽卡请求，所有 Validator 顺序通过
+- **THEN** Chain.Validate 返回 nil；service 进入事务执行抽卡算法
+
+#### Scenario: Balance insufficient fails fast
+- **WHEN** user.balance=10, price=99
+- **THEN** BalanceCheck.Validate 返回 ErrInsufficientBalance；Chain 立即终止；事务未开启
+
+#### Scenario: Seckill chain adds UserLimitCheck
+- **WHEN** 秒杀路径下，user 已购 5 次，per_user_limit=3
+- **THEN** UserLimitCheck 返回 ErrUserLimitExceeded；INCR 已回滚
+
+#### Scenario: New check inserted without modifying existing
+- **WHEN** 新增 RiskCheck（如黑名单检查）
+- **THEN** 仅在 DrawChain.validators 列表中插入；其他 Validator 零改动
+
+---
+
+### Requirement: Hotspot cache (no TTL + logical time + distributed lock + async refresh)
+
+`internal/infra/cache/hotspot/` SHALL 提供热点数据缓存：
+
+```go
+type HotspotLoader func(ctx context.Context, key string) (data any, err error)
+
+type HotspotCache interface {
+    Get(ctx context.Context, key string, loader HotspotLoader, staleAfter time.Duration) (data any, err error)
+    Invalidate(ctx context.Context, key string) error
+}
+```
+
+**算法**（Redis 实现）：
+1. `GET key` → val；nil → 冷启动 → loader 查 DB → `SET key val EX 0`（不过期）→ 返回
+2. val 不 nil → 解析 `RefreshedAt`；now - RefreshedAt > staleAfter → 抢分布式锁
+3. 抢到锁 → `go` 异步 loader + SET；未抢到 → 直接返回老数据
+4. 不管抢没抢到，都返回当前 val（老数据）
+
+**分布式锁**：`SET lock:{key} {uuid} NX EX 5`；释放用 Lua 脚本只删自己的锁。
+
+**singleflight 合并**：冷启动路径用 `golang.org/x/sync/singleflight.Do`，避免 N 个并发请求同时打 DB。
+
+**应用场景**：
+
+| Key 模式 | staleAfter | 用途 |
+|---|---|---|
+| `hotspot:blindbox:{id}` | 30s | 热门盲盒详情 |
+| `hotspot:feed:home` | 60s | 首页 feed |
+
+#### Scenario: Cold start loads from DB
+- **WHEN** 首次请求 `hotspot:blindbox:1`，Redis 无该 key
+- **THEN** loader 查 DB → SET key val EX 0（不过期）→ 返回数据
+
+#### Scenario: Logical time triggers async refresh
+- **WHEN** 第二次请求，data.RefreshedAt 距今 > 30s
+- **THEN** 抢分布式锁 → 抢到者 `go` 异步 loader 查 DB 刷新 cache；当前请求返回老数据
+
+#### Scenario: Concurrent requests see stale data without lock contention
+- **WHEN** 100 个并发请求都发现 staleAfter 到期
+- **THEN** 1 个抢到锁的请求异步刷新；99 个未抢到锁的请求直接返回老数据（无 DB 压力）
+
+#### Scenario: Active invalidation forces reload
+- **WHEN** 供应商编辑盲盒，service 调 `hotspot.Invalidate("hotspot:blindbox:1")`
+- **THEN** Redis DEL key；下次请求触发冷启动 → loader 查 DB → 写回
+
+#### Scenario: Lock release safety via Lua script
+- **WHEN** 持锁者 goroutine panic / 超时（5s TTL 自动释放）
+- **THEN** Lua 脚本保证新持锁者能正确获取；不会误删别人的锁

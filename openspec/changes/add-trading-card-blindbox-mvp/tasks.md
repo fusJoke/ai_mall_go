@@ -154,3 +154,49 @@
 - [ ] 12.5 `web/src/views/supplier/seckill/index.vue` + `edit.vue`：创建 / 编辑秒杀活动（含 total_stock / per_user_limit / 时间窗 / 卡池校验提示）
 - [ ] 12.6 `web/src/lang/{zh-cn,en}/{user,supplier}.yaml`：加 seckill.* i18n key
 - [ ] 12.7 前端集成：抽卡订单详情页要区分 source='seckill' 还是 'normal'，UI 提示用户
+
+## 13. 第三方渠道适配器 + 工厂（对应 D18）
+
+- [ ] 13.1 新增 `internal/infra/channel/channel.go`：定义 `Channel` 接口（Pay / Payout / Notify）+ `PayRequest` / `PayResult` / `PayoutRequest` / `PayoutResult` 等 DTO
+- [ ] 13.2 新增 `internal/infra/channel/factory.go`：实现 `ChannelFactory.Create(name string) (Channel, error)` + drivers 注册表
+- [ ] 13.3 新增 `internal/infra/channel/mock.go`：Mock 实现（MVP 默认，记录调用日志，返回成功）
+- [ ] 13.4 新增 `internal/infra/channel/bank.go`：银行实现占位（MVP = 调 mock，标 TODO）
+- [ ] 13.5 新增 `config/channel.yaml`：channel.payment=mock / channel.bank=mock / channel.sms=mock
+- [ ] 13.6 `cmd/serve/main.go`：`channel.Init()` 装配 ChannelFactory（fail fast）
+- [ ] 13.7 单测：Factory.Create 正确返回 driver；未知 name 返回 ErrUnknownChannel
+- [ ] 13.8 业务集成（解耦）：抽卡 service 与结算 service 通过 factory 调 channel（即使 MVP 是 mock，也走 channel 接口，方便未来替换）
+
+## 14. 订单状态机 - 状态模式（对应 D19）
+
+- [ ] 14.1 新增 `internal/domain/state/state.go`：定义 `State` 接口（Name / CanTransitionTo / OnEnter）+ `OrderContext` 接口 + `Transition` helper
+- [ ] 14.2 新增 `internal/domain/state/draw_order_state.go`：实现 `PendingState` / `PaidState` / `DrawnState` / `FailedState` + 合法转换表
+- [ ] 14.3 新增 `internal/domain/state/settlement_state.go`：实现 `PendingState` / `ProcessingState` / `PaidState` / `FailedState` + 合法转换表
+- [ ] 14.4 新增 `internal/domain/state/state_test.go`：单测覆盖每种合法转换 + 每种非法转换被拒绝 + 终态不可转换
+- [ ] 14.5 修改 `internal/service/user/draw.go`：在事务步骤 7（commit 前）调 `order.Transition(PaidState)`；步骤 9 后调 `order.Transition(DrawnState)`
+- [ ] 14.6 修改 `internal/service/admin/settlement.go`：Generate 后调 `settlement.Transition(ProcessingState)`；MarkPaid 后调 `settlement.Transition(PaidState)`
+- [ ] 14.7 集成测试：非法转换（如 pending → drawn）→ ErrInvalidStateTransition → HTTP 409
+
+## 15. 下单校验责任链（对应 D20）
+
+- [ ] 15.1 新增 `internal/domain/chain/validator.go`：定义 `Validator` 接口（Name / Validate）+ `DrawInput` 输入结构
+- [ ] 15.2 新增 `internal/domain/chain/chain.go`：实现 `Chain` 结构 + `Validate(ctx, input) error`（顺序执行，任一 err 终止）
+- [ ] 15.3 新增 `internal/service/user/draw_check/user_active_check.go`：检查 mall_users.status=1
+- [ ] 15.4 新增 `blindbox_buyable_check.go`：检查 blind_box.status + on_sale + supplier.status
+- [ ] 15.5 新增 `time_window_check.go`：检查活动 / 秒杀 时间窗（传入 source 区分）
+- [ ] 15.6 新增 `user_limit_check.go`（秒杀）：Redis INCR seckill:user_bought
+- [ ] 15.7 新增 `balance_check.go`：检查 user.balance >= actual_price（LEFT JOIN 拿活动价）
+- [ ] 15.8 新增 `internal/service/user/draw_check/chain_builder.go`：组装 DrawChain / SeckillDrawChain
+- [ ] 15.9 修改 `internal/service/user/draw.go`：事务前调 `chain.Validate(ctx, input)`，校验失败 fast return
+- [ ] 15.10 单测：每个 Check 独立测；Chain 顺序执行；任一失败终止
+
+## 16. 热点数据缓存（对应 D21）
+
+- [ ] 16.1 新增 `internal/infra/cache/hotspot/hotspot.go`：定义 `HotspotCache` 接口（Get / Invalidate）+ `HotspotLoader` 函数类型
+- [ ] 16.2 新增 `internal/infra/cache/hotspot/redis_hotspot.go`：Redis 实现（GET / SET / 分布式锁）+ singleflight 合并 + Lua 脚本释放锁
+- [ ] 16.3 新增 `internal/infra/cache/hotspot/hotspot_test.go`：单测覆盖冷启动 / 逻辑时间触发异步刷新 / 并发竞争 / 主动失效 / Lua 锁释放
+- [ ] 16.4 `cmd/serve/main.go`：`hotspot.Init()` 装配 Redis HotspotCache（复用 Redis 客户端）
+- [ ] 16.5 修改 `internal/service/user/blindbox.go` 的 Detail：用 HotspotCache.Get 替换 TTL 缓存（staleAfter=30s）
+- [ ] 16.6 修改 `internal/service/user/home.go` 的 Feed：用 HotspotCache.Get 替换 TTL 缓存（staleAfter=60s）
+- [ ] 16.7 修改 `internal/service/supplier/product.go` 的 Update：事务提交后调 `hotspot.Invalidate("hotspot:blindbox:{id}")`
+- [ ] 16.8 依赖新增：`golang.org/x/sync`（已有，singleflight 子包）
+- [ ] 16.9 集成测试：100 并发请求 cold start → singleflight 合并后只 1 个打 DB；逻辑时间到期后 1 个抢锁异步刷新，其他 99 返回老数据
