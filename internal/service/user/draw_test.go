@@ -370,6 +370,9 @@ func (m *drawOrderRepo) CreateItems(c *gin.Context, items []mall.MallDrawOrderIt
 func (m *drawOrderRepo) ListSettledOrdersBySupplierInRange(c *gin.Context, sid int64, s, e time.Time) ([]mall.MallDrawOrder, error) {
 	return nil, nil
 }
+func (m *drawOrderRepo) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
+	return nil, nil
+}
 func (m *drawOrderRepo) Create(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *drawOrderRepo) List(c *gin.Context, opts repository.ListOptions) ([]mall.MallDrawOrder, int64, error) {
 	return nil, 0, nil

@@ -48,6 +48,10 @@ type DrawOrderRepository interface {
 	// ListSettledOrdersBySupplierInRange 拉某供应商在 [startAt, endAt) 内
 	// 状态为 drawn 的订单，供 service 层生成结算单。
 	ListSettledOrdersBySupplierInRange(c *gin.Context, supplierID int64, startAt, endAt time.Time) ([]mall.MallDrawOrder, error)
+
+	// ListBoxDrawnOrders 拉某商品全部「drawn 且未被批次账单结算」订单
+	// （GenerateForBox 聚合用，openspec: add-batch-settlement）。
+	ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error)
 }
 
 // gormDrawOrderRepository 是 DrawOrderRepository 的 *gorm.DB 实现。
@@ -146,6 +150,21 @@ func (r *gormDrawOrderRepository) ListSettledOrdersBySupplierInRange(c *gin.Cont
 	err := repository.DB(c).
 		Where("supplier_id = ? AND status = ? AND created_at >= ? AND created_at < ?", supplierID, mall.OrderStatusDrawn, startAt, endAt).
 		Order("created_at ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+// ListBoxDrawnOrders 拉某商品全部「drawn 且未被批次账单结算」订单。
+//
+// NOT EXISTS 判 mall_settlement_bill_items.draw_order_id（UK 索引 O(1)），
+// 与周期结算的 ListEligibleOrders 同模式；批次账单与周期结算两表互斥使用，
+// 同一订单不会两边重复结算。id 升序对应下单时间序，保证账单明细顺序稳定。
+func (r *gormDrawOrderRepository) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
+	rows := make([]mall.MallDrawOrder, 0)
+	err := repository.DB(c).
+		Where("blind_box_id = ? AND status = ?", boxID, mall.OrderStatusDrawn).
+		Where("NOT EXISTS (SELECT 1 FROM mall_settlement_bill_items bi WHERE bi.draw_order_id = mall_draw_orders.id)").
+		Order("id ASC").
 		Find(&rows).Error
 	return rows, err
 }

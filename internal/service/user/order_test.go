@@ -74,6 +74,9 @@ func (m *orderDrawOrderRepo) CreateItems(c *gin.Context, items []mall.MallDrawOr
 func (m *orderDrawOrderRepo) ListSettledOrdersBySupplierInRange(c *gin.Context, sid int64, s, e time.Time) ([]mall.MallDrawOrder, error) {
 	return nil, nil
 }
+func (m *orderDrawOrderRepo) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
+	return nil, nil
+}
 func (m *orderDrawOrderRepo) Create(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *orderDrawOrderRepo) List(c *gin.Context, opts repository.ListOptions) ([]mall.MallDrawOrder, int64, error) {
 	return nil, 0, nil

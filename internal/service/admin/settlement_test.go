@@ -194,6 +194,9 @@ func (m *adminSettlementOrderRepo) CreateItems(c *gin.Context, items []mall.Mall
 func (m *adminSettlementOrderRepo) ListSettledOrdersBySupplierInRange(c *gin.Context, supplierID int64, startAt, endAt time.Time) ([]mall.MallDrawOrder, error) {
 	return nil, nil
 }
+func (m *adminSettlementOrderRepo) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
+	return nil, nil
+}
 func (m *adminSettlementOrderRepo) Create(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *adminSettlementOrderRepo) List(c *gin.Context, opts repository.ListOptions) ([]mall.MallDrawOrder, int64, error) {
 	return nil, 0, nil
