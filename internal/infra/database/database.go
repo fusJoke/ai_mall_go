@@ -184,7 +184,13 @@ func buildMySQLDSN(c config.DBInstanceConfig) string {
 		DBName:    c.DBName,
 		ParseTime: true,
 		Loc:       time.Local,
-		Params:    map[string]string{"charset": "utf8mb4"},
+		// AllowNativePasswords 必须显式置 true：结构体字面量不会继承
+		// mysql.NewConfig() 的默认值，零值是 false —— 那种情况下连
+		// mysql_native_password 账号会被驱动直接拒绝，报
+		// "this user requires mysql native password authentication"。
+		// 本地开发库的业务账号 app 正是 native password，故这里是硬需求。
+		AllowNativePasswords: true,
+		Params:               map[string]string{"charset": "utf8mb4"},
 	}
 	return cfg.FormatDSN()
 }

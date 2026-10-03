@@ -77,6 +77,46 @@ const adminBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 静态子路由：供应商管理页（add-trading-card-blindbox-mvp 6.11）
+            path: 'supplier',
+            name: 'adminSupplier',
+            component: () => import('/@/views/admin/supplier/index.vue'),
+            meta: {
+                title: 'pageTitles.adminSupplier',
+                noAuth: false,
+            },
+        },
+        {
+            // 静态子路由：盲盒管理页（add-trading-card-blindbox-mvp 6.11）
+            path: 'blindbox',
+            name: 'adminBlindbox',
+            component: () => import('/@/views/admin/blindbox/index.vue'),
+            meta: {
+                title: 'pageTitles.adminBlindbox',
+                noAuth: false,
+            },
+        },
+        {
+            // 静态子路由：促销活动只读页（add-trading-card-blindbox-mvp 6.11）
+            path: 'promotion',
+            name: 'adminPromotion',
+            component: () => import('/@/views/admin/promotion/index.vue'),
+            meta: {
+                title: 'pageTitles.adminPromotion',
+                noAuth: false,
+            },
+        },
+        {
+            // 静态子路由：结算管理页（add-trading-card-blindbox-mvp 8.11）
+            path: 'settlement',
+            name: 'adminSettlement',
+            component: () => import('/@/views/admin/settlement/index.vue'),
+            meta: {
+                title: 'pageTitles.adminSettlement',
+                noAuth: false,
+            },
+        },
+        {
             // 后台子路径兜底 — 走 loading 路由，让 loading 页面尝试从后端懒加载目标路由
             path: ':path(.*)*',
             redirect: (to) => {

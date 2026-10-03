@@ -3,10 +3,11 @@
 // 启动流程：
 //  1. 从项目根目录加载 config/*.yaml 与 .env.yaml
 //  2. 初始化数据库（GORM + dbresolver）
-//  3. 注册 gin 路由（含 /healthz 与 /api/v1/ping 测试路由）
-//  4. dev 模式额外挂载 /swagger/*any（cfg.Server.Mode == "dev" 时启用；
+//  3. 初始化基础设施：token / upload / cache / mq / search / channel（均 fail fast）
+//  4. 注册 gin 路由（含 /healthz 与 /api/v1/ping 测试路由）
+//  5. dev 模式额外挂载 /swagger/*any（cfg.Server.Mode == "dev" 时启用；
 //     默认 release，生产 binary 不挂载 API 文档，避免忘设环境变量导致意外开放）
-//  5. 监听 SIGINT / SIGTERM，触发优雅关闭
+//  6. 监听 SIGINT / SIGTERM，触发优雅关闭
 //
 // 后续接入 internal/router 与 internal/handler 后，
 // newRouter 会被替换为路由自动发现逻辑。
@@ -36,12 +37,21 @@ import (
 	// 引入 swag init 生成的 docs 包：包级 init() 会把 OpenAPI spec
 	// 注册到 swag 全局，ginSwagger.WrapHandler 在第一次请求时读取。
 	_ "ai-go-mall/docs"
+	"ai-go-mall/internal/infra/cache"
+	"ai-go-mall/internal/infra/cache/hotspot"
+	"ai-go-mall/internal/infra/channel"
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
 	"ai-go-mall/internal/infra/migrate"
+	"ai-go-mall/internal/infra/mq"
+	"ai-go-mall/internal/infra/search"
 	"ai-go-mall/internal/infra/token"
 	"ai-go-mall/internal/infra/upload"
+	// 引入 mall 子包 —— 包内 init() 把 MallCard / MallBlindBox / MallPromotion /
+	// MallDrawOrder / MallSettlement / MallSupplier 等模型注册到 model.Register，
+	// 供运行时一致性检查与日志打印。
 	"ai-go-mall/internal/middleware"
+	_ "ai-go-mall/internal/model/mall"
 	"ai-go-mall/internal/router"
 )
 
@@ -71,6 +81,21 @@ func main() {
 	}
 	if err := upload.Init(); err != nil {
 		log.Fatalf("init upload: %v", err)
+	}
+	if err := cache.Init(); err != nil {
+		log.Fatalf("init cache: %v", err)
+	}
+	if err := hotspot.Init(); err != nil {
+		log.Fatalf("init hotspot: %v", err)
+	}
+	if err := mq.Init(); err != nil {
+		log.Fatalf("init mq: %v", err)
+	}
+	if err := search.Init(); err != nil {
+		log.Fatalf("init search: %v", err)
+	}
+	if err := channel.Init(); err != nil {
+		log.Fatalf("init channel: %v", err)
 	}
 	cfg := config.Get()
 

@@ -5,7 +5,7 @@
 import type { ScrollbarInstance } from 'element-plus'
 import type { CSSProperties } from 'vue'
 import { computed, ref } from 'vue'
-import NavTabs from '/@/layouts/backend/components/navBar/tabs.vue'
+import NavTabs from '/@/layouts/admin/components/navBar/tabs.vue'
 import { mainHeight } from '/@/utils/layout'
 
 /**

@@ -145,10 +145,10 @@ type ClickCaptcha struct {
 
 // VerifyReq 是 VerifyClick 的入参；Points 是用户按点击顺序提交的原始像素坐标（与 ImageWidth/ImageHeight 同一坐标系）。
 type VerifyReq struct {
-	Key    string `json:"key"`
+	Key    string  `json:"key"`
 	Points []Point `json:"points"`
-	W      int    `json:"w"`
-	H      int    `json:"h"`
+	W      int     `json:"w"`
+	H      int     `json:"h"`
 }
 
 // Point 是用户在图片坐标系下的点击坐标。

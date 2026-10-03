@@ -24,7 +24,7 @@ func withCheckToken(t *testing.T, fn func(ctx context.Context, rawToken string) 
 
 // withAdminLookup 在测试期间替换 lookupAdmin，结束时还原。nil 表示恢复默认
 // （database.Get() == nil 时返回 (nil, nil)，middleware 不 panic）。
-func withAdminLookup(t *testing.T, fn func(uid uint) (*model.Admin, error)) {
+func withAdminLookup(t *testing.T, fn func(c *gin.Context, uid uint) (*model.Admin, error)) {
 	t.Helper()
 	prev := lookupAdmin
 	if fn == nil {
@@ -353,7 +353,7 @@ func TestAdminAuth_SetsAdminInContext_OnValidLookup(t *testing.T) {
 	withCheckToken(t, func(ctx context.Context, rawToken string) (*model.Token, error) {
 		return &model.Token{UserID: 42, Type: "admin"}, nil
 	})
-	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+	withAdminLookup(t, func(c *gin.Context, uid uint) (*model.Admin, error) {
 		if uid != 42 {
 			t.Errorf("lookupAdmin got uid = %d, want 42", uid)
 		}
@@ -381,7 +381,7 @@ func TestAdminAuth_AdminNotFound_PassesThroughNilContext(t *testing.T) {
 	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
 		return &model.Token{UserID: 999, Type: "admin"}, nil
 	})
-	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+	withAdminLookup(t, func(c *gin.Context, uid uint) (*model.Admin, error) {
 		return nil, nil
 	})
 
@@ -399,7 +399,7 @@ func TestAdminAuth_LookupError_500(t *testing.T) {
 	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
 		return &model.Token{UserID: 1, Type: "admin"}, nil
 	})
-	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+	withAdminLookup(t, func(c *gin.Context, uid uint) (*model.Admin, error) {
 		return nil, stringError("db down")
 	})
 
@@ -418,7 +418,7 @@ func TestAdminAuth_InvalidToken_NoLookup(t *testing.T) {
 	withCheckToken(t, func(context.Context, string) (*model.Token, error) {
 		return &model.Token{UserID: 1, Type: "user"}, nil // 类型不符
 	})
-	withAdminLookup(t, func(uid uint) (*model.Admin, error) {
+	withAdminLookup(t, func(c *gin.Context, uid uint) (*model.Admin, error) {
 		t.Fatalf("lookupAdmin should NOT be called when token type mismatches")
 		return nil, nil
 	})

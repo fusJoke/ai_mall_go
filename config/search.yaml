@@ -1,0 +1,27 @@
+# Elasticsearch 搜索配置
+#
+# 设计（mall MVP 设计 D6 / D7）：
+#   - 应用进程只读 ES，索引由 cmd/es-sync 离线全量同步。
+#   - 索引文档是「投影」而非 MySQL 镜像，只存首页推荐需要的字段。
+#   - index_prefix 拼到实际索引名（mall_blind_box_index / mall_supplier_index）
+#     前面，方便多环境隔离（dev / staging / prod 不同前缀）。
+#
+# 字段：
+#   - addresses：ES 节点列表（集群多节点时填多个）
+#   - username / password：HTTP Basic 鉴权（本地开发 ES 一般空）
+#   - index_prefix：索引前缀；最终索引名 = {prefix}_blind_box_index /
+#     {prefix}_supplier_index
+#
+# 后续字段（不在本期）：
+#   - sniff / transport（客户端节点发现）—— MVP 单节点，简化
+
+# 注意：外层 `search:` 键必须存在。加载器按文件名合并 config/*.yaml 后直接
+# Unmarshal，不做包壳；Config.Search 的 mapstructure 是 "search"，缺了这层
+# search.elasticsearch.* 会全部落到空值。
+search:
+  elasticsearch:
+    addresses:
+      - http://127.0.0.1:9200
+    username: ""
+    password: ""
+    index_prefix: mall

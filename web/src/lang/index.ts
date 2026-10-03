@@ -35,10 +35,11 @@ const i18n = createI18n({
 })
 
 // 使用 vite import.meta.glob 批量导入 lang 目录下所有 .yaml 文件（包括子目录）
-// 以 raw 文本形式读取，再交给 yaml.parse 解析为 JS 对象
+// 以 raw 文本形式读取，再交给 yaml.parse 解析为 JS 对象。
+// 注：rolldown-vite(v8) 下 `as: 'raw'` 已失效（yaml 会被当 JS 解析），改用 query 形式。
 const langGlobs: Record<LangKey, Record<string, () => Promise<string>>> = {
-    en: import.meta.glob('./en/**/*.yaml', { as: 'raw' }) as Record<string, () => Promise<string>>,
-    'zh-cn': import.meta.glob('./zh-cn/**/*.yaml', { as: 'raw' }) as Record<string, () => Promise<string>>,
+    en: import.meta.glob('./en/**/*.yaml', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>,
+    'zh-cn': import.meta.glob('./zh-cn/**/*.yaml', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>,
 }
 
 /**

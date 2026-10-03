@@ -38,6 +38,13 @@ var expectedManagerRoutes = []struct {
 func TestManagerRoutes_AllRegistered(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
+
+	// 消费既有挂载（若其他测试已消费则为 no-op）+ 重挂本组路由 ——
+	// 与 rule_test.go 同模式：让本测试独立于同包其他测试的执行顺序
+	// （新增 mall_routes_test.go 后原本的"首个 Apply 消费一切"假设不再成立）。
+	consume := gin.New()
+	registry.Apply(consume)
+	registerManagerRoutes()
 	registry.Apply(engine)
 
 	routes := engine.Routes()

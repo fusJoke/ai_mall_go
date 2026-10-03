@@ -1,0 +1,121 @@
+# B 端供应商侧 i18n —— add-trading-card-blindbox-mvp 任务 6.3。
+login:
+  title: 供应商登录
+  subtitle: 入驻卡商的经营管理后台
+  username: 用户名
+  password: 密码
+  remember: 记住我 30 天
+  submit: 登录
+  loading: 登录中...
+  invalidCredentials: 用户名或密码错误
+  invalidCaptcha: 验证码校验失败，请重试
+  accountDisabled: 账号已被禁用，请联系平台
+  failed: 登录失败，请重试
+  gotoUser: 会员入口
+products:
+  title: 盲盒商品
+  create: 新建盲盒
+  edit: 编辑
+  columns:
+    id: ID
+    name: 名称
+    cover: 封面
+    price: 原价
+    onSale: 在售
+    isFeatured: 推荐位
+    status: 状态
+    createdAt: 创建时间
+  dialog:
+    create: 新建盲盒（含卡池）
+    edit: 编辑盲盒
+    name: 盲盒名称
+    cover: 封面图 URL
+    price: 原价（元）
+    description: 描述
+    poolItems: 卡池条目
+    addPoolItem: 添加卡牌
+    cardId: 卡牌 ID
+    rarity: 稀有度
+    weight: 权重
+    stock: 库存
+    weightSum: 权重合计（须为 10000）
+    weightSumInvalid: 卡池权重加和必须等于 10000
+    save: 保存
+    cancel: 取消
+  action:
+    onSale: 上架
+    offSale: 下架
+  statusActive: 启用
+  statusDisabled: 禁用
+promotions:
+  title: 限时特价
+  create: 新建活动
+  columns:
+    id: ID
+    blindBox: 盲盒
+    originalPrice: 原价
+    promoPrice: 活动价
+    startAt: 开始时间
+    endAt: 结束时间
+    status: 状态
+  dialog:
+    create: 新建限时特价
+    blindBoxId: 盲盒 ID
+    originalPrice: 原价（元）
+    promoPrice: 活动价（元）
+    promoPriceInvalid: 活动价必须低于原价
+    timeRange: 活动时间
+    save: 保存
+    cancel: 取消
+  action:
+    toggle: 启停
+    delete: 删除
+    edit: 改价
+  confirmDelete: 确认删除该活动？
+  statusActive: 进行中
+  statusDisabled: 已停用
+  timeOverlap: 与已有活动时间重叠
+  invalidTimeWindow: 结束时间必须晚于开始时间
+  invalidPrice: 活动价必须低于原价
+seckill:
+  title: 秒杀活动
+  create: 新建秒杀
+  editTitle: 编辑秒杀活动
+  createTitle: 新建秒杀活动
+  backToList: 返回秒杀列表
+  columns:
+    id: ID
+    blindBox: 盲盒
+    seckillPrice: 秒杀价
+    totalStock: 总名额
+    perUserLimit: 限购
+    startAt: 开始时间
+    endAt: 结束时间
+    redis: Redis 库存
+    status: 状态
+  redisReady: 已初始化
+  redisMissing: 未初始化
+  statusActive: 启用
+  statusDisabled: 禁用
+  action:
+    label: 操作
+    edit: 编辑
+    toggle: 启停
+  form:
+    blindBoxId: 盲盒 ID
+    seckillPrice: 秒杀价（元）
+    priceHint: 必须低于盲盒原价
+    totalStock: 秒杀总名额
+    stockHint: 不得超过该盲盒卡池剩余库存
+    perUserLimit: 每用户限购
+    timeRange: 活动时间
+    windowHint: 时间窗与归属盲盒创建后不可修改
+    save: 保存
+    cancel: 取消
+  invalidTimeWindow: 结束时间必须晚于开始时间，且开始时间不能早于当前
+  invalidPrice: 秒杀价必须大于 0 且低于盲盒原价
+  stockExceedsPool: 秒杀总名额超过卡池剩余库存
+  forbidden: 该盲盒不属于当前供应商
+  notFound: 秒杀活动不存在
+  redisInitFailed: Redis 库存初始化失败，请重试
+  failed: 操作失败，请重试

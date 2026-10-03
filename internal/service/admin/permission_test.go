@@ -96,8 +96,8 @@ func (m *mockRuleRepository) ListActiveAsMenu() ([]model.AdminRule, error) {
 // 这里全部返回零值（nil/0/false）即可满足接口约束，permission 测试不受影响。
 func (m *mockRuleRepository) Create(_ *gin.Context, _ *model.AdminRule) error { return nil }
 func (m *mockRuleRepository) Update(_ *gin.Context, _ *model.AdminRule) error { return nil }
-func (m *mockRuleRepository) Delete(_ *gin.Context, _ uint) error           { return nil }
-func (m *mockRuleRepository) DeleteBatch(_ *gin.Context, _ []uint) error     { return nil }
+func (m *mockRuleRepository) Delete(_ *gin.Context, _ uint) error             { return nil }
+func (m *mockRuleRepository) DeleteBatch(_ *gin.Context, _ []uint) error      { return nil }
 func (m *mockRuleRepository) UpdateStatus(_ *gin.Context, _ uint, _ int8) error {
 	return nil
 }

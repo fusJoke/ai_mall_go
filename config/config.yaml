@@ -56,3 +56,11 @@ database:
 token:
   # 存储驱动：database（默认） / 后续可加 redis
   driver: database
+
+# mall 业务配置
+mall:
+  # 平台默认手续费率（4 位小数，例 0.1000 = 10%）。
+  # 生效场景：mall_suppliers.commission_rate IS NULL 时使用本值。
+  # 注意：commission_rate 字段在结算单上是"快照"——生成结算单时
+  # 取当时的 supplier.commission_rate 或本默认，落表不再追溯变更。
+  default_commission_rate: 0.1000

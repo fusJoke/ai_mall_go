@@ -1,0 +1,14 @@
+# 第三方渠道配置（mall MVP 设计 D18 / 任务 13.5）。
+#
+# 三个渠道各自的 driver 名，取值域见 internal/infra/channel/factory.go 的
+# drivers 注册表（当前：mock / bank；未来 wechat / alipay / 真实银行 API）。
+# 配置了未注册的名字 → cmd/serve 启动即失败（channel.Init fail fast）。
+#
+# MVP 全部走 mock：
+#   - payment=mock：抽卡仍为余额模拟扣款，mock 仅记录调用（D18）；
+#   - bank=mock：结算仍为 admin 手动 mark_paid，真实银行代发是占位实现；
+#   - sms=mock：短信未启用（密码登录），预留槽位。
+channel:
+  payment: mock        # 未来: wechat / alipay
+  bank: mock           # 未来: 真实银行代发 API
+  sms: mock            # 未来: aliyun sms / tencent cloud

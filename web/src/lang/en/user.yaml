@@ -1,0 +1,100 @@
+# C 端 user i18n (English) — add-trading-card-blindbox-mvp task 6.3.
+login:
+  title: Member Login
+  subtitle: Sign in to start drawing cards
+  username: Username
+  password: Password
+  remember: Remember me for 30 days
+  submit: Sign In
+  loading: Signing in...
+  invalidCredentials: Invalid username or password
+  invalidCaptcha: Captcha verification failed, please retry
+  accountDisabled: Account has been disabled
+  failed: Login failed, please retry
+  gotoSupplier: Supplier portal
+home:
+  title: Featured
+  suppliers: Featured Suppliers
+  blindBoxCount: On-sale boxes
+  viewDetail: Open a Box
+  price: Price per box
+  empty: No recommendations yet, check back soon
+  searchUnavailable: Recommendation service unavailable, try later
+blindbox:
+  probability: Odds Table
+  stock: Stock left
+  originalPrice: Original price
+  promotionPrice: Limited-time offer
+  promotionEnds: Ends at
+  draw: Draw Now
+  drawing: Drawing...
+  soldOut: Sold Out
+  buyDisabled: Not available
+  poolPreview: Pool Preview
+  drawSuccess: Congratulations!
+  soldOutMsg: Sold out, try another box
+  insufficientBalance: Insufficient balance, please top up
+  notAvailable: This box is off sale or unavailable
+  rateLimited: Too many requests, slow down
+  drawFailed: Draw failed, please retry
+  loginRequired: Please sign in first
+  followBtn: Follow supplier
+  followBtnActive: Following
+follow:
+  title: My Following
+  empty: You haven't followed any supplier yet
+  unfollow: Unfollowed
+  followedAt: Followed at
+  viewBlindbox: View blind boxes
+  loginRequired: Please sign in to view your following list
+orders:
+  title: My Orders
+  orderNo: Order No.
+  price: Amount
+  status: Status
+  source: Source
+  createdAt: Created At
+  action: Actions
+  viewDetail: Detail
+  empty: No draws yet, explore the mall first
+  statusPaid: Paid
+  statusDrawn: Drawn
+  statusFailed: Failed
+  statusPending: Pending
+  sourceNormal: Normal
+  sourceSeckill: Seckill
+  items: Drawn Cards
+  rarity: Rarity
+  cardName: Card
+  backToList: Back to Orders
+  notFound: Order not found or access denied
+seckill:
+  title: Flash Sale
+  subtitle: Hot card deals, first come first served
+  tag: Flash
+  empty: No flash sale is running right now
+  sold: Sold {sold}/{total}
+  stockUnknown: Unknown
+  ended: Sale ended
+  limitUnit: pc
+  backToList: Back to Flash Sales
+  perUserLimit: Purchase Limit
+  totalStock: Total Slots
+  remaining: Remaining
+  window: Sale Window
+  startsIn: Starts in
+  endsIn: Ends in
+  notStarted: Not Started
+  draw: Grab It Now
+  drawing: Grabbing...
+  soldOut: Sold Out
+  soldOutMsg: All flash sale slots are gone
+  userLimitExceeded: You have reached the per-user purchase limit
+  insufficientBalance: Insufficient balance, please top up
+  notInWindow: Outside the sale window
+  notAvailable: Activity not found or already ended
+  blindboxNotAvailable: The blind box in this sale is off shelf
+  rateLimited: Too many requests, slow down
+  loginRequired: Please sign in first
+  drawFailed: Flash sale failed, please retry
+  viewBlindbox: View Blind Box

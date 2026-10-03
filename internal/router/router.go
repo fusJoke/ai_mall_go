@@ -21,6 +21,7 @@ import (
 	// 子路由自动发现：空白导入触发各子包 init() 把路由挂载登记到 registry。
 	_ "ai-go-mall/internal/router/admin"
 	_ "ai-go-mall/internal/router/common"
+	_ "ai-go-mall/internal/router/supplier"
 	_ "ai-go-mall/internal/router/user"
 )
 

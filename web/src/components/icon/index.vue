@@ -1,6 +1,28 @@
 <script lang="ts">
 import { createVNode, createCommentVNode, resolveComponent, defineComponent, computed, type CSSProperties } from 'vue'
-import { Sparkles, Eye, EyeOff, Mail } from '@lucide/vue'
+import {
+    Sparkles,
+    Eye,
+    EyeOff,
+    Mail,
+    Home,
+    Users,
+    Settings,
+    ListTree,
+    LayoutGrid,
+    Search,
+    Sun,
+    Moon,
+    Maximize,
+    Minimize,
+    Languages,
+    LogOut,
+    Monitor,
+    X,
+    RefreshCw,
+    PanelLeftClose,
+    PanelLeftOpen,
+} from '@lucide/vue'
 import Svg from '/@/components/icon/svg/index.vue'
 import { isExternal } from '/@/utils/common'
 
@@ -11,6 +33,23 @@ const lucideIcons: Record<string, any> = {
     Eye,
     EyeOff,
     Mail,
+    Home,
+    Users,
+    Settings,
+    ListTree,
+    LayoutGrid,
+    Search,
+    Sun,
+    Moon,
+    Maximize,
+    Minimize,
+    Languages,
+    LogOut,
+    Monitor,
+    X,
+    RefreshCw,
+    PanelLeftClose,
+    PanelLeftOpen,
 }
 
 export default defineComponent({

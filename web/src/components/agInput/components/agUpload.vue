@@ -118,6 +118,9 @@ interface Props extends /* @vue-ignore */ Partial<UploadProps> {
     hideSelectFile?: boolean
     // 强制上传到本地存储
     forceLocal?: boolean
+    // 上传驱动（local / aliyun / tencent / qiniu...），随请求发送 driver 参数，
+    // 实际驱动由服务端决定（多驱动上传约定，见 mock/uploadDrivers.ts）
+    driver?: string
     // 在上传数量达到限制时隐藏图片上传按钮
     hideImagePlusOnOverLimit?: boolean
 }
@@ -137,6 +140,7 @@ const props = withDefaults(defineProps<Props>(), {
     returnFullUrl: false,
     hideSelectFile: false,
     forceLocal: false,
+    driver: 'local',
     hideImagePlusOnOverLimit: false,
 })
 
@@ -355,7 +359,7 @@ const onElChange = (file: UploadFileExt, files: UploadFiles) => {
     state.uploading++
     fileUpload(
         fd,
-        { uuid: uuid(), force_local: props.forceLocal ? 1 : 0 },
+        { uuid: uuid(), force_local: props.forceLocal ? 1 : 0, driver: props.driver },
         {
             onUploadProgress: (evt: AxiosProgressEvent) => {
                 const progressEvt = evt as UploadProgressEvent
