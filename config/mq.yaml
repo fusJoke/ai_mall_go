@@ -1,0 +1,36 @@
+# 消息队列配置（mall MVP 设计 D17）
+#
+# 设计：
+#   - driver：选 MQ 实现。"redis" = Redis Stream（生产推荐）；"mock" = 进程内 mock（仅单测）
+#   - consumer_group：消费组名（Redis Stream 多消费者隔离维度）
+#   - block_timeout：XREADGROUP BLOCK 超时（Subscribe 循环间隔）
+#   - redis.* ：Redis 连接配置（与 cache.redis 共享同一实例是允许的；
+#                但 Driver 各持一份 client，简单可靠）
+#
+# 字段说明：
+#   - driver：默认 "redis"
+#   - consumer_group：默认 "mall-stock-sync"（秒杀库存对账）
+#   - block_timeout：默认 5s（XREADGROUP 阻塞读的最大等待时长）
+#
+# 后续字段（不在本期）：
+#   - retry.max_attempts / retry.backoff：handler 失败重试策略
+#   - dead_letter.stream：死信队列（handler 失败 N 次后入 DLQ）
+
+# 注意：外层 `mq:` 键必须存在。Config.MQ 的 mapstructure 是 "mq"。
+mq:
+  # MQ 实现选择：redis / mock
+  driver: redis
+
+  consumer_group: mall-stock-sync
+  # XREADGROUP BLOCK 超时
+  block_timeout: 5s
+
+  # Redis 连接配置（driver=redis 时生效）
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    # 留空 —— 真值由 .env.yaml 的 mq.redis.password 提供（gitignored，本地覆盖）。
+    password: ""
+    # Redis 数据库编号（默认 0；与 cache 共用 DB 也可，但 MVP 分开）
+    db: 1
+    pool_size: 20
