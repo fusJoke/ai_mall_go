@@ -22,7 +22,7 @@
 ## 4. Handler 与 Router
 
 - [x] 4.1 `internal/handler/supplier/bill.go`（list/detail/confirm/reject）+ `product.go` 加 Duplicate handler；`internal/router/supplier/` 注册 5 条（均 SupplierAuth）。+ handler 测试
-- [ ] 4.2 `internal/handler/admin/bill.go`（list/detail/regenerate/mark-paid）；`internal/router/admin/mall.go` 注册 4 条（AdminAuth）。+ handler 测试
+- [x] 4.2 `internal/handler/admin/bill.go`（list/detail/regenerate/mark-paid）；`internal/router/admin/mall.go` 注册 4 条（AdminAuth）。+ handler 测试
 
 ## 5. 前端（B 端 + Admin）
 

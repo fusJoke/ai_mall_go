@@ -29,6 +29,11 @@ var expectedMallAdminRoutes = []struct {
 	{http.MethodPost, "/admin/settlement/preview"},
 	{http.MethodPost, "/admin/settlement/generate"},
 	{http.MethodPost, "/admin/settlement/mark-paid"},
+	// --- 批次账单（商品即批次 v2） ---
+	{http.MethodGet, "/admin/bill/list"},
+	{http.MethodGet, "/admin/bill/detail"},
+	{http.MethodPost, "/admin/bill/regenerate"},
+	{http.MethodPost, "/admin/bill/mark-paid"},
 }
 
 // TestMallAdminRoutes_AllRegistered 验证 12 条 mall 管理路由全部就位。

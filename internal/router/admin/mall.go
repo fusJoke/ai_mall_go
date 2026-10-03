@@ -1,4 +1,4 @@
-// Package admin — mall.go 注册 admin 对供应商 / 盲盒 / 结算管理的 12 条路由。
+// Package admin — mall.go 注册 admin 对供应商 / 盲盒 / 结算管理的 16 条路由。
 //
 // 全部挂 AdminAuth；handler 与 service 懒装配（首次请求时 sync.Once），
 // 与 admin.go 的 ensureDeps 模式一致 —— mall 管理服务只依赖 DB 仓储，
@@ -19,6 +19,7 @@ import (
 	supplierRepo "ai-go-mall/internal/repository/supplier"
 	"ai-go-mall/internal/router/registry"
 	adminSvc "ai-go-mall/internal/service/admin"
+	mallSvc "ai-go-mall/internal/service/mall"
 )
 
 // mall handlers 的懒装配（独立于 admin.go 的 serviceOnce，避免耦合其 captcha 依赖）。
@@ -28,6 +29,7 @@ var (
 	mallPromotionH  *adminHandler.MallPromotionHandler
 	mallBlindBoxH   *adminHandler.MallBlindBoxHandler
 	mallSettlementH *adminHandler.MallSettlementHandler
+	mallBillH       *adminHandler.MallBillHandler
 	mallSeckillH    *adminHandler.MallSeckillHandler
 	mallDepsInitErr error
 )
@@ -59,6 +61,15 @@ func ensureMallDeps() {
 			Channels:       channelInfra.Get(), // D18：MarkPaid 后经 bank 渠道记录打款
 		})
 		mallSettlementH = adminHandler.NewMallSettlementHandler(settlementSvc)
+
+		// 批次账单（商品即批次 v2）：admin 核对 rejected 账单 + 打款 confirmed 账单。
+		billSvc := mallSvc.NewBillService(mallSvc.BillServiceDeps{
+			BillRepo:     mallRepo.NewSettlementBillRepository(),
+			BoxRepo:      mallRepo.NewBlindBoxRepository(),
+			SupplierRepo: supplierRepo.NewSupplierRepository(),
+			OrderRepo:    mallRepo.NewDrawOrderRepository(),
+		})
+		mallBillH = adminHandler.NewMallBillHandler(billSvc)
 
 		// 秒杀管理（D15）：admin 视角全量分页 + 代供应商创建 + 强制启停。
 		seckillSvc := adminSvc.NewSeckillService(adminSvc.SeckillServiceDeps{
@@ -114,6 +125,12 @@ func registerMallAdminRoutes() {
 	registry.Register("/admin", http.MethodPost, "/settlement/preview", wrapMall(func() func(*gin.Context) { return mallSettlementH.Preview }), middleware.AdminAuth())
 	registry.Register("/admin", http.MethodPost, "/settlement/generate", wrapMall(func() func(*gin.Context) { return mallSettlementH.Generate }), middleware.AdminAuth())
 	registry.Register("/admin", http.MethodPost, "/settlement/mark-paid", wrapMall(func() func(*gin.Context) { return mallSettlementH.MarkPaid }), middleware.AdminAuth())
+
+	// --- 批次账单（商品即批次 v2：4 条路由） ---
+	registry.Register("/admin", http.MethodGet, "/bill/list", wrapMall(func() func(*gin.Context) { return mallBillH.List }), middleware.AdminAuth())
+	registry.Register("/admin", http.MethodGet, "/bill/detail", wrapMall(func() func(*gin.Context) { return mallBillH.Detail }), middleware.AdminAuth())
+	registry.Register("/admin", http.MethodPost, "/bill/regenerate", wrapMall(func() func(*gin.Context) { return mallBillH.Regenerate }), middleware.AdminAuth())
+	registry.Register("/admin", http.MethodPost, "/bill/mark-paid", wrapMall(func() func(*gin.Context) { return mallBillH.MarkPaid }), middleware.AdminAuth())
 
 	// --- 秒杀管理（D15：3 条路由） ---
 	registry.Register("/admin", http.MethodGet, "/seckill/list", wrapMall(func() func(*gin.Context) { return mallSeckillH.List }), middleware.AdminAuth())

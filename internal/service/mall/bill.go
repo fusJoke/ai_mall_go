@@ -89,6 +89,14 @@ type BillService interface {
 	//  2. GenerateForBox 幂等建账单（已有账单直接返回）。
 	// 任一步失败 → 抽卡事务整体回滚（账单与订单原子——用户不会为「没有账单的抽卡」付款）。
 	FinalizeSoldOut(c *gin.Context, boxID int64) error
+
+	// ListAdmin admin 账单列表：全量分页，可按 status / supplier 筛（零值不筛）。
+	ListAdmin(c *gin.Context, status mall.MallSettlementBillStatus, supplierID int64, opts repository.ListOptions) (items []mall.MallSettlementBill, total int64, err error)
+
+	// Detail 账单 + 明细（admin 无归属概念，直达）。
+	//
+	// 账单不存在 → ErrBillNotFound。
+	Detail(c *gin.Context, billID int64) (*mall.MallSettlementBill, []mall.MallSettlementBillItem, error)
 }
 
 // BillServiceDeps 注入 BillService 所需的依赖。
@@ -358,6 +366,26 @@ func roundHalfUp(v float64, decimals int) float64 {
 		return math.Floor(v*shift+0.5) / shift
 	}
 	return math.Ceil(v*shift-0.5) / shift
+}
+
+// ListAdmin 实现见 BillService 注释（透传 repo，status/supplierID 零值不筛）。
+func (s *baseBillService) ListAdmin(c *gin.Context, status mall.MallSettlementBillStatus, supplierID int64, opts repository.ListOptions) ([]mall.MallSettlementBill, int64, error) {
+	return s.bill.ListAdmin(c, status, supplierID, opts)
+}
+
+// Detail 实现见 BillService 注释。
+func (s *baseBillService) Detail(c *gin.Context, billID int64) (*mall.MallSettlementBill, []mall.MallSettlementBillItem, error) {
+	if billID <= 0 {
+		return nil, nil, ErrBillNotFound
+	}
+	bill, items, err := s.bill.GetByIDWithItems(c, billID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrBillNotFound
+		}
+		return nil, nil, err
+	}
+	return bill, items, nil
 }
 
 // 编译期断言。

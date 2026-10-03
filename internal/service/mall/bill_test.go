@@ -14,6 +14,7 @@ import (
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
 	"ai-go-mall/internal/model/mall"
+	"ai-go-mall/internal/repository"
 	mallRepo "ai-go-mall/internal/repository/mall"
 	supplierRepo "ai-go-mall/internal/repository/supplier"
 )
@@ -74,6 +75,8 @@ type fakeBillRepo struct {
 	deductFunc       func(c *gin.Context, supplierID int64, amount float64) (int64, error)
 	setLifecycleFunc func(c *gin.Context, boxID int64, from, to mall.MallBlindBoxLifecycle) (int64, error)
 	regenerateFunc   func(c *gin.Context, id int64, amounts mallRepo.BillRegenAmounts, remark string) (int64, error)
+	listAdminFunc    func(c *gin.Context, status mall.MallSettlementBillStatus, supplierID int64, opts repository.ListOptions) ([]mall.MallSettlementBill, int64, error)
+	getWithItemsFunc func(c *gin.Context, id int64) (*mall.MallSettlementBill, []mall.MallSettlementBillItem, error)
 
 	createCalls       int
 	lastCreateBill    *mall.MallSettlementBill
@@ -141,6 +144,20 @@ func (f *fakeBillRepo) Regenerate(c *gin.Context, id int64, amounts mallRepo.Bil
 		return f.regenerateFunc(c, id, amounts, remark)
 	}
 	return 1, nil
+}
+
+func (f *fakeBillRepo) ListAdmin(c *gin.Context, status mall.MallSettlementBillStatus, supplierID int64, opts repository.ListOptions) ([]mall.MallSettlementBill, int64, error) {
+	if f.listAdminFunc != nil {
+		return f.listAdminFunc(c, status, supplierID, opts)
+	}
+	return []mall.MallSettlementBill{{ID: 1, SupplierID: supplierID}}, 1, nil
+}
+
+func (f *fakeBillRepo) GetByIDWithItems(c *gin.Context, id int64) (*mall.MallSettlementBill, []mall.MallSettlementBillItem, error) {
+	if f.getWithItemsFunc != nil {
+		return f.getWithItemsFunc(c, id)
+	}
+	return nil, nil, gorm.ErrRecordNotFound
 }
 
 type fakeBoxRepo struct {
@@ -664,5 +681,66 @@ func TestRegenerate_CASMisss(t *testing.T) {
 		newBillPlainCtx(), 77, mallRepo.BillRegenAmounts{TotalAmount: 10}, "")
 	if !errors.Is(err, ErrBillStatusConflict) {
 		t.Errorf("Regenerate CAS miss = %v, want ErrBillStatusConflict", err)
+	}
+}
+
+// =============================================================================
+// ListAdmin / Detail（Task 4.2：admin 视角读路径）
+// =============================================================================
+
+// TestBillListAdmin_Delegates admin 列表透传 repo（status / supplier 零值不筛）。
+func TestBillListAdmin_Delegates(t *testing.T) {
+	var gotStatus mall.MallSettlementBillStatus
+	var gotSupplier int64
+	var gotOpts repository.ListOptions
+	b := &fakeBillRepo{
+		listAdminFunc: func(c *gin.Context, status mall.MallSettlementBillStatus, supplierID int64, opts repository.ListOptions) ([]mall.MallSettlementBill, int64, error) {
+			gotStatus, gotSupplier, gotOpts = status, supplierID, opts
+			return []mall.MallSettlementBill{{ID: 1}}, 1, nil
+		},
+	}
+
+	items, total, err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, &fakeOrderRepo{}).ListAdmin(
+		newBillPlainCtx(), mall.BillStatusRejected, 7, repository.ListOptions{Page: 2, PageSize: 5})
+	if err != nil {
+		t.Fatalf("ListAdmin = %v", err)
+	}
+	if len(items) != 1 || total != 1 {
+		t.Errorf("items/total = %d/%d", len(items), total)
+	}
+	if gotStatus != mall.BillStatusRejected || gotSupplier != 7 || gotOpts.Page != 2 || gotOpts.PageSize != 5 {
+		t.Errorf("args = %v/%d/%+v", gotStatus, gotSupplier, gotOpts)
+	}
+}
+
+// TestBillDetail_Happy admin 详情：账单 + 明细。
+func TestBillDetail_Happy(t *testing.T) {
+	b := &fakeBillRepo{
+		getWithItemsFunc: func(c *gin.Context, id int64) (*mall.MallSettlementBill, []mall.MallSettlementBillItem, error) {
+			if id != 77 {
+				t.Errorf("id = %d, want 77", id)
+			}
+			return &mall.MallSettlementBill{ID: 77}, []mall.MallSettlementBillItem{{DrawOrderID: 9}}, nil
+		},
+	}
+
+	bill, items, err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, &fakeOrderRepo{}).Detail(newBillPlainCtx(), 77)
+	if err != nil {
+		t.Fatalf("Detail = %v", err)
+	}
+	if bill.ID != 77 || len(items) != 1 {
+		t.Errorf("bill/items = %+v/%d", bill, len(items))
+	}
+}
+
+// TestBillDetail_NotFound 不存在 → ErrBillNotFound（gorm 转译）。
+func TestBillDetail_NotFound(t *testing.T) {
+	b := &fakeBillRepo{} // getWithItemsFunc 未设置 → gorm.ErrRecordNotFound
+
+	if _, _, err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, &fakeOrderRepo{}).Detail(newBillPlainCtx(), 77); !errors.Is(err, ErrBillNotFound) {
+		t.Errorf("Detail(not found) = %v, want ErrBillNotFound", err)
+	}
+	if _, _, err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, &fakeOrderRepo{}).Detail(newBillPlainCtx(), 0); !errors.Is(err, ErrBillNotFound) {
+		t.Errorf("Detail(id=0) = %v, want ErrBillNotFound", err)
 	}
 }
