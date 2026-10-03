@@ -58,6 +58,7 @@ import (
 	mallRepo "ai-go-mall/internal/repository/mall"
 	supplierRepo "ai-go-mall/internal/repository/supplier"
 	userRepo "ai-go-mall/internal/repository/user"
+	mallSvc "ai-go-mall/internal/service/mall"
 	"ai-go-mall/internal/service/user/draw_check"
 )
 
@@ -164,6 +165,10 @@ type DrawServiceDeps struct {
 	CardRepo       mallRepo.CardRepository
 	SettlementRepo mallRepo.SettlementRepository // spec 8.5 步骤 7.6：累加 total_revenue
 
+	// BillSvc 批次账单服务（openspec: add-batch-settlement 步骤 7.7）：
+	// 售罄时同事务落定 lifecycle + 生成账单。nil 时跳过售罄检测（兼容旧单测）。
+	BillSvc mallSvc.BillService
+
 	// CheckChain 下单责任链（task 15 / design D20）；事务前调 Validate。
 	// nil 时 service 仍能跑（凭多驱动兼容旧单测），但跳过校验 → 等价旧行为。
 	CheckChain *chain.Chain
@@ -186,6 +191,7 @@ type baseDrawService struct {
 	order      mallRepo.DrawOrderRepository
 	card       mallRepo.CardRepository
 	settlement mallRepo.SettlementRepository
+	billSvc    mallSvc.BillService
 	checkChain *chain.Chain
 	channels   channel.ChannelFactory
 	txr        txRunner
@@ -206,6 +212,7 @@ func NewDrawService(d DrawServiceDeps) DrawService {
 		order:      d.DrawOrderRepo,
 		card:       d.CardRepo,
 		settlement: d.SettlementRepo,
+		billSvc:    d.BillSvc,
 		checkChain: d.CheckChain,
 		channels:   d.Channels,
 		txr:        txr,
@@ -335,6 +342,13 @@ func (s *baseDrawService) Draw(c *gin.Context, userID, blindBoxID int64) (*DrawR
 			return err
 		}
 
+		// 7.7 售罄检测（openspec: add-batch-settlement）：扣减后池内总库存为 0 →
+		// 商品 lifecycle selling→sold_out（CAS）+ 幂等生成批次账单，与抽卡事务原子提交。
+		// 账单生成失败 → 整笔事务回滚（用户不会为「没有账单的抽卡」付款）。
+		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, blindBoxID); err != nil {
+			return err
+		}
+
 		// 8. 落订单（uuid v7 作 order_no；初始 status=pending，paid/drawn 由
 		//    状态机校验后通过 repo.UpdateStatus 推进）。状态机包 internal/domain/state。
 		orderNo, err := newOrderNo()
@@ -400,6 +414,27 @@ func (s *baseDrawService) Draw(c *gin.Context, userID, blindBoxID int64) (*DrawR
 	// 渠道层记录模拟支付（D18；事务外，失败仅 warn，见 channel_hooks.go）。
 	recordChannelPayment(s.channels, c.Request.Context(), userID, result, "盲盒抽卡")
 	return result, nil
+}
+
+// settleSoldOutIfEmpty 售罄检测与落定（openspec: add-batch-settlement 步骤 7.7）。
+//
+// 普通抽卡（7.7）与秒杀（4.g++）共用：扣减后池内总库存为 0 →
+// 商品 lifecycle selling→sold_out（CAS）→ 幂等生成批次账单，
+// 全程运行在调用方的抽卡事务内，任一步失败整体回滚。
+//
+// billSvc 为 nil 时跳过（兼容旧单测 / 缺依赖装配，与 Channels/CheckChain 同策略）。
+func settleSoldOutIfEmpty(c *gin.Context, cp mallRepo.CardPoolRepository, billSvc mallSvc.BillService, poolID, boxID int64) error {
+	if billSvc == nil {
+		return nil
+	}
+	remaining, err := cp.SubtotalStockByPoolID(c, poolID)
+	if err != nil {
+		return err
+	}
+	if remaining != 0 {
+		return nil // 未售罄，正常返回
+	}
+	return billSvc.FinalizeSoldOut(c, boxID)
 }
 
 // pickWeightedItemWithRetry 实现 D3 步骤 4 的「条件扣减失败重试 1 次」逻辑。
@@ -572,6 +607,10 @@ type SeckillServiceDeps struct {
 	Publisher      Publisher                  // 事务后异步 publish stock.deduction.sync（D17）
 	Channels       channel.ChannelFactory     // D18：事务提交后经 "payment" 渠道记录模拟支付；nil 跳过
 
+	// BillSvc 批次账单服务（openspec: add-batch-settlement 步骤 7.7）；
+	// nil 时跳过售罄检测（兼容旧单测）。
+	BillSvc mallSvc.BillService
+
 	// CheckChain 下单责任链（task 15 / design D20）；事务前调 Validate。
 	// nil 时 service 仍能跑（兼容旧单测），但跳过 chain 校验 → 等价旧行为。
 	CheckChain *chain.Chain
@@ -598,6 +637,7 @@ type baseSeckillService struct {
 	order      mallRepo.DrawOrderRepository
 	settlement mallRepo.SettlementRepository
 	seckill    mallRepo.SeckillRepository
+	billSvc    mallSvc.BillService
 	cache      cache.Cache
 	publisher  Publisher
 	checkChain *chain.Chain
@@ -620,6 +660,7 @@ func NewSeckillService(d SeckillServiceDeps) SeckillService {
 		order:      d.DrawOrderRepo,
 		settlement: d.SettlementRepo,
 		seckill:    d.SeckillRepo,
+		billSvc:    d.BillSvc,
 		cache:      d.Cache,
 		publisher:  d.Publisher,
 		checkChain: d.CheckChain,
@@ -774,6 +815,12 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 
 		// 4.g+ 累加 platform ledger 的 total_revenue（spec 8.5）。
 		if err := s.settlement.IncrementLedger(txCtx, "total_revenue", sec.SeckillPrice); err != nil {
+			return err
+		}
+
+		// 4.g++ 售罄检测（openspec: add-batch-settlement）：同 7.7，秒杀链路售罄
+		// 同样落定 lifecycle 并生成批次账单（原子提交）。
+		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, bb.ID); err != nil {
 			return err
 		}
 

@@ -79,6 +79,16 @@ type BillService interface {
 	//
 	// 错误：ErrBillNotFound / state.ErrInvalidStateTransition / ErrBillStatusConflict。
 	Regenerate(c *gin.Context, billID int64, amounts mallRepo.BillRegenAmounts, remark string) error
+
+	// FinalizeSoldOut 抽卡事务尾部的售罄落定（openspec: add-batch-settlement 步骤 7.7）。
+	//
+	// 前置：调用方（draw.go 普通抽卡 / 秒杀事务）已判定池内总库存为 0
+	// （SubtotalStockByPoolID == 0），且当前处于抽卡事务内（c 为 txCtx）。
+	// 步骤：
+	//  1. 商品 lifecycle selling→sold_out CAS（0 行 = 重复触发 / 状态已推进，幂等继续）；
+	//  2. GenerateForBox 幂等建账单（已有账单直接返回）。
+	// 任一步失败 → 抽卡事务整体回滚（账单与订单原子——用户不会为「没有账单的抽卡」付款）。
+	FinalizeSoldOut(c *gin.Context, boxID int64) error
 }
 
 // BillServiceDeps 注入 BillService 所需的依赖。
@@ -265,6 +275,22 @@ func (s *baseBillService) Regenerate(c *gin.Context, billID int64, amounts mallR
 	}
 	if rows == 0 {
 		return ErrBillStatusConflict
+	}
+	return nil
+}
+
+// FinalizeSoldOut 实现见 BillService 注释。
+func (s *baseBillService) FinalizeSoldOut(c *gin.Context, boxID int64) error {
+	if boxID <= 0 {
+		return errors.New("mall.bill: invalid box id")
+	}
+	// 1. CAS 落定售罄。0 行 = 重复触发（并发抢先后重放 / 补偿重跑），幂等继续。
+	if _, err := s.bill.SetBoxLifecycle(c, boxID, mall.LifecycleSelling, mall.LifecycleSoldOut); err != nil {
+		return err
+	}
+	// 2. 幂等建账单（已有账单 → GenerateForBox 直接返回）。
+	if _, err := s.GenerateForBox(c, boxID); err != nil {
+		return err
 	}
 	return nil
 }

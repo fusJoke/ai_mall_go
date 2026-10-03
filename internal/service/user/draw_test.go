@@ -17,6 +17,7 @@ import (
 	mallRepo "ai-go-mall/internal/repository/mall"
 	supplierRepo "ai-go-mall/internal/repository/supplier"
 	userRepo "ai-go-mall/internal/repository/user"
+	mallSvc "ai-go-mall/internal/service/mall"
 	"ai-go-mall/internal/service/user/draw_check"
 )
 
@@ -93,6 +94,7 @@ type drawCardPoolRepo struct {
 	listItemsByPoolIDFunc   func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
 	listItemsForUpdateFunc  func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
 	decrementStockFunc      func(c *gin.Context, itemID int64) error
+	subtotalStockFunc       func(c *gin.Context, poolID int64) (int64, error)
 
 	getPoolCalls    int
 	listItemsCalls  int
@@ -173,6 +175,9 @@ func (m *drawCardPoolRepo) SumWeightByPoolID(c *gin.Context, poolID int64) (int6
 	return 0, nil
 }
 func (m *drawCardPoolRepo) SubtotalStockByPoolID(c *gin.Context, poolID int64) (int64, error) {
+	if m.subtotalStockFunc != nil {
+		return m.subtotalStockFunc(c, poolID)
+	}
 	return 0, nil
 }
 
@@ -480,6 +485,7 @@ type drawDeps struct {
 	order      *drawOrderRepo
 	card       *drawCardRepo
 	settlement *drawSettlementRepo
+	billSvc    mallSvc.BillService
 	txr        txRunner
 }
 
@@ -557,6 +563,7 @@ func newSvcFromDeps(d drawDeps) DrawService {
 		DrawOrderRepo:  d.order,
 		CardRepo:       d.card,
 		SettlementRepo: d.settlement,
+		BillSvc:        d.billSvc,
 		CheckChain:     checkChain,
 		TxRunner:       d.txr,
 	})
@@ -1104,5 +1111,85 @@ func TestNewOrderNo_FitsVarchar32(t *testing.T) {
 			t.Fatalf("第 %d 次生成重复的 order_no %q", i, orderNo)
 		}
 		seen[orderNo] = struct{}{}
+	}
+}
+
+// =============================================================================
+// 7.7 售罄落定接线（openspec: add-batch-settlement，task 3.2）
+// =============================================================================
+
+// fakeBillSvc 是 mallSvc.BillService 的最小 fake：只实现 draw.go 会调用的
+// FinalizeSoldOut；其余方法来自嵌入的 nil 接口（调用即 panic = 测试红）。
+type fakeBillSvc struct {
+	mallSvc.BillService
+
+	finalizeFunc func(c *gin.Context, boxID int64) error
+
+	finalizeCalls    int
+	lastFinalizeBox  int64
+}
+
+func (f *fakeBillSvc) FinalizeSoldOut(c *gin.Context, boxID int64) error {
+	f.finalizeCalls++
+	f.lastFinalizeBox = boxID
+	if f.finalizeFunc != nil {
+		return f.finalizeFunc(c, boxID)
+	}
+	return nil
+}
+
+// TestDraw_NotSoldOut_SkipsBillSettle 池内仍有库存 → 不触发售罄落定。
+func TestDraw_NotSoldOut_SkipsBillSettle(t *testing.T) {
+	d := defaultDeps()
+	bill := &fakeBillSvc{}
+	d.billSvc = bill
+	d.cp.subtotalStockFunc = func(c *gin.Context, poolID int64) (int64, error) {
+		return 100, nil // 还有库存
+	}
+
+	svc := newSvcFromDeps(d)
+	if _, err := svc.Draw(newDrawCtx(), 1, 9); err != nil {
+		t.Fatalf("Draw: %v", err)
+	}
+	if bill.finalizeCalls != 0 {
+		t.Errorf("finalizeCalls = %d, want 0 (not sold out)", bill.finalizeCalls)
+	}
+}
+
+// TestDraw_SoldOut_FinalizesBill 池内库存清零 → FinalizeSoldOut 恰好触发一次。
+func TestDraw_SoldOut_FinalizesBill(t *testing.T) {
+	d := defaultDeps()
+	bill := &fakeBillSvc{}
+	d.billSvc = bill
+	d.cp.subtotalStockFunc = func(c *gin.Context, poolID int64) (int64, error) {
+		return 0, nil // 最后一单扣减后清零
+	}
+
+	svc := newSvcFromDeps(d)
+	if _, err := svc.Draw(newDrawCtx(), 1, 9); err != nil {
+		t.Fatalf("Draw: %v", err)
+	}
+	if bill.finalizeCalls != 1 {
+		t.Fatalf("finalizeCalls = %d, want 1", bill.finalizeCalls)
+	}
+	if bill.lastFinalizeBox != 9 {
+		t.Errorf("lastFinalizeBox = %d, want 9", bill.lastFinalizeBox)
+	}
+}
+
+// TestDraw_BillFinalizeFailure_RollsBack 账单落定失败 → 抽卡事务失败（回滚语义）。
+func TestDraw_BillFinalizeFailure_RollsBack(t *testing.T) {
+	d := defaultDeps()
+	bill := &fakeBillSvc{finalizeFunc: func(c *gin.Context, boxID int64) error {
+		return errors.New("mall.bill: simulated finalize failure")
+	}}
+	d.billSvc = bill
+	d.cp.subtotalStockFunc = func(c *gin.Context, poolID int64) (int64, error) {
+		return 0, nil
+	}
+
+	svc := newSvcFromDeps(d)
+	if _, err := svc.Draw(newDrawCtx(), 1, 9); err == nil {
+		t.Errorf("Draw with failing bill finalize = nil, want err (tx must roll back)")
 	}
 }

@@ -547,6 +547,66 @@ func TestMarkPaid_ZeroPayout(t *testing.T) {
 }
 
 // =============================================================================
+// FinalizeSoldOut（draw.go 7.7 售罄落定）
+// =============================================================================
+
+// TestFinalizeSoldOut_Happy 正常落定：CAS selling→sold_out + 幂等建账单。
+func TestFinalizeSoldOut_Happy(t *testing.T) {
+	withBillTestConfig(t)
+	b := &fakeBillRepo{}
+	x := &fakeBoxRepo{getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return soldOutBox(), nil
+	}}
+	s := &fakeSupplierRepo{getByIDFunc: func(c *gin.Context, id int64) (*mall.MallSupplier, error) {
+		return supplierWithRate(0.1), nil
+	}}
+	o := &fakeOrderRepo{listBoxDrawnOrdersFunc: func(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
+		return []mall.MallDrawOrder{{ID: 101, Price: 100}}, nil
+	}}
+
+	if err := newBillService(b, x, s, o).FinalizeSoldOut(newBillPlainCtx(), 9); err != nil {
+		t.Fatalf("FinalizeSoldOut: %v", err)
+	}
+	if b.setLifecycleCalls != 1 || b.lastLifecycleFrom != mall.LifecycleSelling || b.lastLifecycleTo != mall.LifecycleSoldOut {
+		t.Errorf("lifecycle CAS = %d call(s), %s -> %s, want 1 call, selling -> sold_out",
+			b.setLifecycleCalls, b.lastLifecycleFrom, b.lastLifecycleTo)
+	}
+	if b.createCalls != 1 {
+		t.Errorf("createCalls = %d, want 1 (bill generated)", b.createCalls)
+	}
+}
+
+// TestFinalizeSoldOut_Idempotent 重复触发：CAS 0 行（已售罄）+ 账单已存在 → 静默幂等。
+func TestFinalizeSoldOut_Idempotent(t *testing.T) {
+	withBillTestConfig(t)
+	existing := &mall.MallSettlementBill{ID: 77, BlindBoxID: 9}
+	b := &fakeBillRepo{
+		setLifecycleFunc: func(c *gin.Context, boxID int64, from, to mall.MallBlindBoxLifecycle) (int64, error) {
+			return 0, nil // CAS 未命中：lifecycle 已是 sold_out
+		},
+		getByBoxIDFunc: func(c *gin.Context, boxID int64) (*mall.MallSettlementBill, error) {
+			return existing, nil // 账单已存在
+		},
+	}
+	o := &fakeOrderRepo{}
+
+	if err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, o).FinalizeSoldOut(newBillPlainCtx(), 9); err != nil {
+		t.Fatalf("FinalizeSoldOut idempotent: %v", err)
+	}
+	if b.createCalls != 0 || o.listBoxCalls != 0 {
+		t.Errorf("createCalls/listBoxCalls = %d/%d, want 0/0 (fully idempotent)", b.createCalls, o.listBoxCalls)
+	}
+}
+
+// TestFinalizeSoldOut_InvalidBox 非法 boxID 短路。
+func TestFinalizeSoldOut_InvalidBox(t *testing.T) {
+	b := &fakeBillRepo{}
+	if err := newBillService(b, &fakeBoxRepo{}, &fakeSupplierRepo{}, &fakeOrderRepo{}).FinalizeSoldOut(newBillPlainCtx(), 0); err == nil {
+		t.Errorf("FinalizeSoldOut(boxID=0) = nil, want err")
+	}
+}
+
+// =============================================================================
 // Regenerate
 // =============================================================================
 

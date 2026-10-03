@@ -15,7 +15,7 @@
 ## 3. Service 层（TDD：先测后码）
 
 - [x] 3.1 `internal/service/mall/bill.go`（中立包，user/admin 共用）：`GenerateForBox(tx, boxID)`（聚合该商品全部 drawn 订单→按 commission_rate 快照算 commission/payout→建账单+明细，幂等：已有账单则跳过）、`MarkPaid`（confirmed→paid CAS + `supplier.balance -= payout` 同事务 + 商品置 settled）、`Regenerate`。+ 单测。验收：`go test ./internal/service/mall/`
-- [ ] 3.2 `internal/service/user/draw.go` 事务尾部（普通+秒杀两处，7.5/7.6 之后加 7.7）：扣减后 `pool_total_stock=0` → 盲盒 `lifecycle: selling→sold_out`（CAS）→ 调 `GenerateForBox` 同事务建账单。+ 单测（未售罄不触发/售罄触发一次/重复触发幂等）。验收：`go test ./internal/service/user/`
+- [x] 3.2 `internal/service/user/draw.go` 事务尾部（普通+秒杀两处，7.5/7.6 之后加 7.7）：扣减后 `pool_total_stock=0` → 盲盒 `lifecycle: selling→sold_out`（CAS）→ 调 `GenerateForBox` 同事务建账单。+ 单测（未售罄不触发/售罄触发一次/重复触发幂等）。验收：`go test ./internal/service/user/`
 - [ ] 3.3 `internal/service/supplier/bill.go`：List（自己的）/Detail（校验归属）/Confirm（generated→confirmed）/Reject（generated→rejected，必填原因）。+ 单测
 - [ ] 3.4 `internal/service/supplier/product.go` 加 `Duplicate`：校验归属→事务内复制商品+卡池（weight 结构保留、stock 置 0、名称建议"第 N 期"）→ 返回新 boxID。+ 单测
 
