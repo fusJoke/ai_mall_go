@@ -125,9 +125,10 @@ func (m *productBlindBoxRepo) Delete(c *gin.Context, id int64) error            
 var _ mallRepo.BlindBoxRepository = (*productBlindBoxRepo)(nil)
 
 type productCardPoolRepo struct {
-	createPoolFunc  func(f *m_unused_anchor) error // 占位避免编译器报 unused-arg
-	createItemsFunc func(c *gin.Context, items []mall.MallCardPoolItem) error
-	getPoolFunc     func(c *gin.Context, bbID int64) (*mall.MallCardPool, error)
+	createPoolFunc        func(f *m_unused_anchor) error // 占位避免编译器报 unused-arg
+	createItemsFunc       func(c *gin.Context, items []mall.MallCardPoolItem) error
+	getPoolFunc           func(c *gin.Context, bbID int64) (*mall.MallCardPool, error)
+	listItemsByPoolIDFunc func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
 
 	createPoolCalls, createItemsCalls int
 	lastPoolID                        int64
@@ -165,6 +166,9 @@ func (m *productCardPoolRepo) GetPoolByBlindBoxID(c *gin.Context, bbID int64) (*
 
 // 其他方法 no-op。
 func (m *productCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
+	if m.listItemsByPoolIDFunc != nil {
+		return m.listItemsByPoolIDFunc(c, poolID)
+	}
 	return nil, nil
 }
 func (m *productCardPoolRepo) ListItemsForUpdateByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
@@ -601,5 +605,174 @@ func TestProductUpdate_NilCache_NoPanic(t *testing.T) {
 	})
 	if err := svc.Update(newProductCtx(), 7, 1, ProductPatch{Name: ptrStr("x")}); err != nil {
 		t.Errorf("Update with nil cache: %v", err)
+	}
+}
+
+// =============================================================================
+// Duplicate（openspec: add-batch-settlement，task 3.4「再来一批」）
+// =============================================================================
+
+// ownedSourceBox 返回一个属于 supplier 7 的源商品 fixture（第 3 期）。
+func ownedSourceBox() *mall.MallBlindBox {
+	return &mall.MallBlindBox{
+		ID:          9,
+		SupplierID:  7,
+		Name:        "星愿卡包 第 3 期",
+		Cover:       "cover.png",
+		Price:       59.9,
+		Description: "老批次描述",
+	}
+}
+
+// srcPoolItems 返回源卡池 items（weight 保留、stock 有值）。
+func srcPoolItems() []mall.MallCardPoolItem {
+	return []mall.MallCardPoolItem{
+		{ID: 1, PoolID: 500, CardID: 11, Rarity: mall.RaritySSR, Weight: 100, Stock: 0},
+		{ID: 2, PoolID: 500, CardID: 12, Rarity: mall.RarityN, Weight: 9900, Stock: 95},
+	}
+}
+
+// withSourceBox 把 fake 装配成「源商品存在且属于 supplier 7」的形态。
+func withSourceBox(d productDeps) productDeps {
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return ownedSourceBox(), nil
+	}
+	d.cp.getPoolFunc = func(c *gin.Context, bbID int64) (*mall.MallCardPool, error) {
+		return &mall.MallCardPool{ID: 500, BlindBoxID: bbID}, nil
+	}
+	d.cp.listItemsByPoolIDFunc = func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
+		return srcPoolItems(), nil
+	}
+	return d
+}
+
+// TestProductDuplicate_Happy 正常复制：字段/卡池/重置规则/期数递增全链路。
+func TestProductDuplicate_Happy(t *testing.T) {
+	d := withSourceBox(defaultProductDeps())
+	svc := newProductSvcFromDeps(d)
+
+	newID, err := svc.Duplicate(newProductCtx(), 7, 9)
+	if err != nil {
+		t.Fatalf("Duplicate: %v", err)
+	}
+	if newID != 1 {
+		t.Errorf("newID = %d, want 1 (fake 自增)", newID)
+	}
+
+	// 新商品：名称期数递增、字段复制、重置项正确。
+	box := d.bb.lastCreated
+	if box == nil {
+		t.Fatal("no box created")
+	}
+	if box.Name != "星愿卡包 第 4 期" {
+		t.Errorf("name = %q, want 期数递增 %q", box.Name, "星愿卡包 第 4 期")
+	}
+	if box.Cover != "cover.png" || box.Price != 59.9 || box.Description != "老批次描述" {
+		t.Errorf("copied fields = %s/%v/%s", box.Cover, box.Price, box.Description)
+	}
+	if box.SupplierID != 7 || box.Status != mall.StatusActive {
+		t.Errorf("supplier/status = %d/%s, want 7/active", box.SupplierID, box.Status)
+	}
+	if box.OnSale {
+		t.Errorf("on_sale = true, want false (新批次默认下架)")
+	}
+	if box.Lifecycle != mall.LifecycleSelling {
+		t.Errorf("lifecycle = %s, want selling", box.Lifecycle)
+	}
+	if box.IsFeatured {
+		t.Errorf("is_featured = true, want false (admin 领域不复制)")
+	}
+
+	// 新卡池：结构复制、weight 保留、stock 全部置 0。
+	items := d.cp.lastItems
+	if d.cp.createItemsCalls != 1 || len(items) != 2 {
+		t.Fatalf("items = %d calls / %d rows, want 1 call / 2 rows", d.cp.createItemsCalls, len(items))
+	}
+	for i, it := range items {
+		if it.Stock != 0 {
+			t.Errorf("items[%d].stock = %d, want 0 (必须重填)", i, it.Stock)
+		}
+		if it.PoolID != 100 { // fake CreatePool 首池 ID = 1*100
+			t.Errorf("items[%d].poolID = %d, want 100 (回填新池)", i, it.PoolID)
+		}
+	}
+	if items[0].CardID != 11 || items[0].Weight != 100 || items[1].CardID != 12 || items[1].Weight != 9900 {
+		t.Errorf("card/weight structure not preserved: %+v", items)
+	}
+}
+
+// TestProductDuplicate_NoPeriodSuffix 源名称无期数 → 追加「第 2 期」。
+func TestProductDuplicate_NoPeriodSuffix(t *testing.T) {
+	d := withSourceBox(defaultProductDeps())
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		box := ownedSourceBox()
+		box.Name = "星愿卡包"
+		return box, nil
+	}
+
+	if _, err := newProductSvcFromDeps(d).Duplicate(newProductCtx(), 7, 9); err != nil {
+		t.Fatalf("Duplicate: %v", err)
+	}
+	if got := d.bb.lastCreated.Name; got != "星愿卡包 第 2 期" {
+		t.Errorf("name = %q, want %q", got, "星愿卡包 第 2 期")
+	}
+}
+
+// TestProductDuplicate_Forbidden 复制他人商品 → 403。
+func TestProductDuplicate_Forbidden(t *testing.T) {
+	d := withSourceBox(defaultProductDeps())
+	svc := newProductSvcFromDeps(d)
+
+	if _, err := svc.Duplicate(newProductCtx(), 8, 9); !errors.Is(err, ErrBlindBoxForbidden) {
+		t.Errorf("Duplicate(other's box) = %v, want ErrBlindBoxForbidden", err)
+	}
+	if d.bb.createCalls != 0 {
+		t.Errorf("createCalls = %d, want 0 (ownership check must short-circuit)", d.bb.createCalls)
+	}
+}
+
+// TestProductDuplicate_SourceNotFound 源商品不存在 → 404。
+func TestProductDuplicate_SourceNotFound(t *testing.T) {
+	d := defaultProductDeps() // GetByID → gorm.ErrRecordNotFound
+	if _, err := newProductSvcFromDeps(d).Duplicate(newProductCtx(), 7, 9); !errors.Is(err, ErrBlindBoxNotFound) {
+		t.Errorf("Duplicate(missing source) = %v, want ErrBlindBoxNotFound", err)
+	}
+}
+
+// TestProductDuplicate_EmptyPool 源卡池无 items → ErrEmptyPool。
+func TestProductDuplicate_EmptyPool(t *testing.T) {
+	d := withSourceBox(defaultProductDeps())
+	d.cp.listItemsByPoolIDFunc = func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
+		return nil, nil // 空 items
+	}
+	if _, err := newProductSvcFromDeps(d).Duplicate(newProductCtx(), 7, 9); !errors.Is(err, ErrEmptyPool) {
+		t.Errorf("Duplicate(empty pool) = %v, want ErrEmptyPool", err)
+	}
+}
+
+// TestProductDuplicate_TxRollback 复制中途失败 → 整体回滚（返回错误）。
+func TestProductDuplicate_TxRollback(t *testing.T) {
+	d := withSourceBox(defaultProductDeps())
+	d.cp.createItemsFunc = func(c *gin.Context, items []mall.MallCardPoolItem) error {
+		return errors.New("simulated create items failure")
+	}
+	if _, err := newProductSvcFromDeps(d).Duplicate(newProductCtx(), 7, 9); err == nil {
+		t.Errorf("Duplicate with repo failure = nil, want err (tx roll back)")
+	}
+}
+
+// TestNextBatchName 期数递增规则表驱动。
+func TestNextBatchName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"星愿卡包 第 3 期", "星愿卡包 第 4 期"},
+		{"星愿卡包", "星愿卡包 第 2 期"},
+		{"第 9 期", "第 10 期"},
+		{"星愿 第12期 特别版", "星愿 第13期 特别版"},
+		{"  前后空格  ", "前后空格 第 2 期"},
+	}
+	for _, c := range cases {
+		if got := nextBatchName(c.in); got != c.want {
+			t.Errorf("nextBatchName(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

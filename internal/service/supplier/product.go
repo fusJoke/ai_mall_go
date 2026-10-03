@@ -12,6 +12,9 @@ package supplier
 
 import (
 	"errors"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -89,6 +92,19 @@ type ProductService interface {
 	//
 	// 业务规则同 Update：ownership 自检；成功后失效详情缓存。
 	ToggleOnSale(c *gin.Context, supplierID, blindBoxID int64, onSale bool) error
+
+	// Duplicate 复制一个历史商品为新批次（openspec: add-batch-settlement「再来一批」）。
+	//
+	// 复制矩阵：
+	//   - 复制：描述 / 封面 / 价格 / 卡池结构（card_id + rarity + weight）；
+	//   - 改写：名称按「第 N 期」递增（源名称无期数 → 追加「第 2 期」）；
+	//   - 重置：卡池 items.stock 全部置 0（新批次必须重填库存）、lifecycle=selling、
+	//     on_sale=false（默认下架，填好库存再上架）、is_featured=false（admin 领域）；
+	//   - 不复制：订单 / 账单（新商品无历史关联）。
+	//
+	// ownership 自检同 Update；事务内复制（box → pool → items，与 Create 同序），
+	// 返回新 blindBoxID。
+	Duplicate(c *gin.Context, supplierID, sourceBoxID int64) (int64, error)
 }
 
 // ProductPatch 是商品编辑的「只改传入字段」入参：nil = 该字段不改。
@@ -281,6 +297,107 @@ func (s *baseProductService) ToggleOnSale(c *gin.Context, supplierID, blindBoxID
 		_ = userSvc.InvalidateDetail(c.Request.Context(), s.cache, s.hotspot, blindBoxID)
 	}
 	return nil
+}
+
+// Duplicate 实现见 ProductService 注释。
+func (s *baseProductService) Duplicate(c *gin.Context, supplierID, sourceBoxID int64) (int64, error) {
+	if supplierID <= 0 {
+		return 0, ErrBlindBoxForbidden
+	}
+	if sourceBoxID <= 0 {
+		return 0, ErrBlindBoxNotFound
+	}
+
+	// ownership 自检（同 Update）：不属于当前 supplier → 403。
+	src, err := s.bb.GetByID(c, sourceBoxID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, ErrBlindBoxNotFound
+		}
+		return 0, err
+	}
+	if src == nil || src.SupplierID != supplierID {
+		return 0, ErrBlindBoxForbidden
+	}
+
+	// 拉源卡池结构（1 商品 1 卡池）。
+	srcPool, err := s.cp.GetPoolByBlindBoxID(c, sourceBoxID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, ErrEmptyPool
+		}
+		return 0, err
+	}
+	srcItems, err := s.cp.ListItemsByPoolID(c, srcPool.ID)
+	if err != nil {
+		return 0, err
+	}
+	if len(srcItems) == 0 {
+		return 0, ErrEmptyPool
+	}
+
+	// 构造新商品实例（商品即批次：新批次 = 新商品）。
+	box := &mall.MallBlindBox{
+		SupplierID:  supplierID,
+		Name:        nextBatchName(src.Name),
+		Cover:       src.Cover,
+		Price:       src.Price,
+		Status:      mall.StatusActive,
+		OnSale:      false, // 创建默认下架：新批次 stock=0，填好库存再上架
+		Lifecycle:   mall.LifecycleSelling,
+		Description: src.Description,
+		// IsFeatured 不复制：推荐是 admin 领域。
+	}
+
+	// 复制卡池 items：weight 结构保留，stock 全部置 0（必须重填）。
+	items := make([]mall.MallCardPoolItem, 0, len(srcItems))
+	for _, it := range srcItems {
+		items = append(items, mall.MallCardPoolItem{
+			CardID: it.CardID,
+			Rarity: it.Rarity,
+			Weight: it.Weight,
+			Stock:  0,
+		})
+	}
+
+	// 事务内复制：INSERT box → pool → items（与 Create 同序，任一步失败整体回滚）。
+	if err := s.txr.Run(c, func(txCtx *gin.Context) error {
+		if err := s.bb.Create(txCtx, box); err != nil {
+			return err
+		}
+		pool := &mall.MallCardPool{BlindBoxID: box.ID}
+		if err := s.cp.CreatePool(txCtx, pool); err != nil {
+			return err
+		}
+		for i := range items {
+			items[i].PoolID = pool.ID
+		}
+		return s.cp.CreateItems(txCtx, items)
+	}); err != nil {
+		return 0, err
+	}
+	return box.ID, nil
+}
+
+// batchPeriodRe 匹配名称中的「第 N 期」片段（允许空格）。
+var batchPeriodRe = regexp.MustCompile(`第\s*(\d+)\s*期`)
+
+// nextBatchName 生成下一期名称：
+//   - 名称含「第 N 期」→ 取最后一个片段，N 递增（"星愿 第 3 期" → "星愿 第 4 期"）；
+//   - 无期数 → 追加「第 2 期」（"星愿卡包" → "星愿卡包 第 2 期"）。
+func nextBatchName(name string) string {
+	locs := batchPeriodRe.FindAllStringSubmatchIndex(name, -1)
+	if len(locs) == 0 {
+		return strings.TrimSpace(name) + " 第 2 期"
+	}
+	loc := locs[len(locs)-1]
+	n, err := strconv.Atoi(name[loc[2]:loc[3]])
+	if err != nil {
+		// 正则保证 \d+，防御性兜底：退化为追加。
+		return strings.TrimSpace(name) + " 第 2 期"
+	}
+	// 只替换数字捕获组，「第 / 期」字样保留。
+	return name[:loc[2]] + strconv.Itoa(n+1) + name[loc[3]:]
 }
 
 // 编译期断言：baseProductService 必须实现 ProductService。

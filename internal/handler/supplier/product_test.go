@@ -17,18 +17,20 @@ import (
 
 // mockProductService 实现 supplierSvc.ProductService。
 type mockProductService struct {
-	listFunc   func(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
-	createFunc func(c *gin.Context, supplierID int64, b *mall.MallBlindBox, items []mall.MallCardPoolItem) (*mall.MallBlindBox, error)
-	updateFunc func(c *gin.Context, supplierID, blindBoxID int64, patch supplierSvc.ProductPatch) error
-	toggleFunc func(c *gin.Context, supplierID, blindBoxID int64, onSale bool) error
+	listFunc      func(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
+	createFunc    func(c *gin.Context, supplierID int64, b *mall.MallBlindBox, items []mall.MallCardPoolItem) (*mall.MallBlindBox, error)
+	updateFunc    func(c *gin.Context, supplierID, blindBoxID int64, patch supplierSvc.ProductPatch) error
+	toggleFunc    func(c *gin.Context, supplierID, blindBoxID int64, onSale bool) error
+	duplicateFunc func(c *gin.Context, supplierID, sourceBoxID int64) (int64, error)
 
-	lastSupplierID int64
-	lastBlindBox   *mall.MallBlindBox
-	lastItems      []mall.MallCardPoolItem
-	lastToggleID   int64
-	lastToggleVal  bool
-	lastUpdateID   int64
-	lastPatch      supplierSvc.ProductPatch
+	lastSupplierID  int64
+	lastBlindBox    *mall.MallBlindBox
+	lastItems       []mall.MallCardPoolItem
+	lastToggleID    int64
+	lastToggleVal   bool
+	lastUpdateID    int64
+	lastPatch       supplierSvc.ProductPatch
+	lastDuplicateID int64
 }
 
 func (m *mockProductService) List(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
@@ -67,6 +69,15 @@ func (m *mockProductService) ToggleOnSale(c *gin.Context, supplierID, blindBoxID
 		return m.toggleFunc(c, supplierID, blindBoxID, onSale)
 	}
 	return nil
+}
+
+func (m *mockProductService) Duplicate(c *gin.Context, supplierID, sourceBoxID int64) (int64, error) {
+	m.lastSupplierID = supplierID
+	m.lastDuplicateID = sourceBoxID
+	if m.duplicateFunc != nil {
+		return m.duplicateFunc(c, supplierID, sourceBoxID)
+	}
+	return 88, nil
 }
 
 var _ supplierSvc.ProductService = (*mockProductService)(nil)
