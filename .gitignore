@@ -6,6 +6,10 @@
 /tmp/
 build-errors.log
 
+# Windows 下 `go build` 默认产物（无 -o 时落到仓库根）
+# 仅根目录的 *.exe；不影响依赖里的可执行文件
+/*.exe
+
 # 测试产物
 *.test
 *.out
