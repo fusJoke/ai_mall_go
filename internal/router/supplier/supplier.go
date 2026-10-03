@@ -3,7 +3,7 @@
 // 通过 init() 自注册到 internal/router/registry；router.Setup 调用时由
 // Apply 懒创建 /supplier 对应的 r.Group 并挂载到引擎。
 //
-// 路由清单（15 条）：
+// 路由清单（20 条）：
 //
 //	POST /supplier/login                    公开     供应商登录
 //	POST /supplier/logout                   公开     供应商登出（幂等）
@@ -11,6 +11,11 @@
 //	POST /supplier/products/create          登录态   创建盲盒 + 卡池（事务）
 //	POST /supplier/products/edit            登录态   编辑盲盒（失效详情缓存）
 //	POST /supplier/products/toggle-onsale   登录态   上下架
+//	POST /supplier/products/duplicate       登录态   复制盲盒（再来一批）
+//	GET  /supplier/bills/list               登录态   我的批次账单列表
+//	GET  /supplier/bills/detail             登录态   账单详情（校验归属）
+//	POST /supplier/bills/confirm            登录态   确认账单（generated→confirmed）
+//	POST /supplier/bills/reject             登录态   驳回账单（必填原因）
 //	GET  /supplier/promotions/list          登录态   我的活动列表
 //	POST /supplier/promotions/create        登录态   创建限时特价（冲突校验）
 //	POST /supplier/promotions/edit          登录态   改活动价格
@@ -52,6 +57,7 @@ var (
 	depsOnce    sync.Once
 	authH       *supplierHandler.AuthHandler
 	productH    *supplierHandler.ProductHandler
+	billH       *supplierHandler.BillHandler
 	promotionH  *supplierHandler.PromotionHandler
 	seckillH    *supplierHandler.SeckillHandler
 	depsInitErr error
@@ -80,6 +86,12 @@ func ensureDeps() {
 			Hotspot:      hotspotInfra.Get(), // D21：写路径同步失效热点详情
 		})
 		productH = supplierHandler.NewProductHandler(productSvc)
+
+		// 批次账单（商品即批次 v2：售罄自动生成的结算账单，供应商确认/驳回）。
+		billSvc := supplierSvc.NewBillService(supplierSvc.BillServiceDeps{
+			BillRepo: mallRepo.NewSettlementBillRepository(),
+		})
+		billH = supplierHandler.NewBillHandler(billSvc)
 
 		// 活动管理（Toggle / Delete 失效详情缓存）。
 		promotionSvc := supplierSvc.NewPromotionService(supplierSvc.PromotionServiceDeps{
@@ -134,6 +146,13 @@ func registerSupplierRoutes() {
 	registry.Register("/supplier", http.MethodPost, "/products/create", wrap(func(c *gin.Context) { productH.Create(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/edit", wrap(func(c *gin.Context) { productH.Edit(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/toggle-onsale", wrap(func(c *gin.Context) { productH.ToggleOnSale(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodPost, "/products/duplicate", wrap(func(c *gin.Context) { productH.Duplicate(c) }), middleware.SupplierAuth())
+
+	// --- 批次账单（登录态） ---
+	registry.Register("/supplier", http.MethodGet, "/bills/list", wrap(func(c *gin.Context) { billH.List(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodGet, "/bills/detail", wrap(func(c *gin.Context) { billH.Detail(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodPost, "/bills/confirm", wrap(func(c *gin.Context) { billH.Confirm(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodPost, "/bills/reject", wrap(func(c *gin.Context) { billH.Reject(c) }), middleware.SupplierAuth())
 
 	// --- 活动管理（登录态） ---
 	registry.Register("/supplier", http.MethodGet, "/promotions/list", wrap(func(c *gin.Context) { promotionH.List(c) }), middleware.SupplierAuth())

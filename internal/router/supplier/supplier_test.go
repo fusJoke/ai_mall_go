@@ -28,6 +28,12 @@ var expectedSupplierRoutes = []struct {
 	{http.MethodPost, "/supplier/products/create"},
 	{http.MethodPost, "/supplier/products/edit"},
 	{http.MethodPost, "/supplier/products/toggle-onsale"},
+	{http.MethodPost, "/supplier/products/duplicate"},
+
+	{http.MethodGet, "/supplier/bills/list"},
+	{http.MethodGet, "/supplier/bills/detail"},
+	{http.MethodPost, "/supplier/bills/confirm"},
+	{http.MethodPost, "/supplier/bills/reject"},
 
 	{http.MethodGet, "/supplier/promotions/list"},
 	{http.MethodPost, "/supplier/promotions/create"},
@@ -36,7 +42,7 @@ var expectedSupplierRoutes = []struct {
 	{http.MethodPost, "/supplier/promotions/delete"},
 }
 
-// TestSupplierRoutes_AllRegistered 验证 11 条 B 端路由全部就位。
+// TestSupplierRoutes_AllRegistered 验证 16 条 B 端路由全部就位。
 func TestSupplierRoutes_AllRegistered(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

@@ -71,6 +71,11 @@ type ToggleOnSaleRequest struct {
 	OnSale bool  `json:"on_sale"`
 }
 
+// DuplicateRequest 是 POST /supplier/products/duplicate 的请求体。
+type DuplicateRequest struct {
+	ID int64 `json:"id" binding:"required"`
+}
+
 // List 处理 GET /supplier/products/list。
 //
 // @Summary      我的盲盒列表
@@ -249,6 +254,51 @@ func (h *ProductHandler) ToggleOnSale(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": "toggle.ok", "message": "ok"})
+}
+
+// Duplicate 处理 POST /supplier/products/duplicate（再来一批）。
+//
+// 复制源盲盒为新一期：名称「第 N 期」递增、卡池结构（rarity/weight）保留、
+// stock 全部置 0 待重填、默认下架（OnSale=false）、lifecycle=selling。
+// 订单与账单不复制。
+//
+// @Summary      复制盲盒（再来一批）
+// @Description  事务内复制商品 + 卡池结构（weight 保留、stock 置 0），返回新盲盒 ID。
+// @Tags         supplier
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        req  body  supplier.DuplicateRequest  true  "源盲盒 ID"
+// @Success      200  {object}  map[string]any  "id = 新盲盒 ID"
+// @Failure      400  {object}  map[string]string  "product.invalid_input"
+// @Failure      401  {object}  map[string]string  "product.unauthorized"
+// @Failure      403  {object}  map[string]string  "product.forbidden"
+// @Failure      404  {object}  map[string]string  "product.not_found"
+// @Failure      422  {object}  map[string]string  "product.empty_pool"
+// @Failure      500  {object}  map[string]string  "product.internal"
+// @Router       /supplier/products/duplicate [post]
+func (h *ProductHandler) Duplicate(c *gin.Context) {
+	supplierID, ok := requireSupplierID(c, "product")
+	if !ok {
+		return
+	}
+
+	var req DuplicateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "product.invalid_input",
+			"message": "invalid duplicate request",
+		})
+		return
+	}
+
+	newID, err := h.svc.Duplicate(c, supplierID, req.ID)
+	if err != nil {
+		status, code := mapProductErr(err)
+		c.JSON(status, gin.H{"code": code, "message": "duplicate product failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": newID})
 }
 
 // requireSupplierID 从 context 取当前供应商 ID；缺失时写出 401 并返回 false。

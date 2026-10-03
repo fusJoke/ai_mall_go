@@ -349,3 +349,77 @@ func TestProductToggleOnSale_HappyPath(t *testing.T) {
 		t.Errorf("toggle args = %d/%v/%d", svc.lastToggleID, svc.lastToggleVal, svc.lastSupplierID)
 	}
 }
+
+func TestProductDuplicate_HappyPath(t *testing.T) {
+	svc := &mockProductService{
+		duplicateFunc: func(c *gin.Context, supplierID, sourceBoxID int64) (int64, error) {
+			if supplierID != 10 || sourceBoxID != 7 {
+				t.Errorf("args = %d/%d, want 10/7", supplierID, sourceBoxID)
+			}
+			return 88, nil
+		},
+	}
+	h := NewProductHandler(svc)
+
+	code, resp := doSupplierJSON(t, http.MethodPost, "/supplier/products/duplicate", map[string]any{
+		"id": 7,
+	}, func(r *gin.Engine) {
+		r.POST("/supplier/products/duplicate", withSupplier(10), h.Duplicate)
+	})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d; body=%v", code, resp)
+	}
+	if resp["id"] != float64(88) {
+		t.Errorf("id = %v, want 88", resp["id"])
+	}
+}
+
+func TestProductDuplicate_MissingID_400(t *testing.T) {
+	svc := &mockProductService{}
+	h := NewProductHandler(svc)
+
+	code, _ := doSupplierJSON(t, http.MethodPost, "/supplier/products/duplicate", map[string]any{}, func(r *gin.Engine) {
+		r.POST("/supplier/products/duplicate", withSupplier(10), h.Duplicate)
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+	if svc.lastDuplicateID != 0 {
+		t.Errorf("Duplicate should NOT be called")
+	}
+}
+
+func TestProductDuplicate_ServiceErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantStr  string
+	}{
+		{"not_found", supplierSvc.ErrBlindBoxNotFound, http.StatusNotFound, "product.not_found"},
+		{"forbidden", supplierSvc.ErrBlindBoxForbidden, http.StatusForbidden, "product.forbidden"},
+		{"empty_pool", supplierSvc.ErrEmptyPool, http.StatusUnprocessableEntity, "product.empty_pool"},
+		{"internal", errors.New("db: down"), http.StatusInternalServerError, "product.internal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &mockProductService{
+				duplicateFunc: func(c *gin.Context, supplierID, sourceBoxID int64) (int64, error) {
+					return 0, tc.err
+				},
+			}
+			h := NewProductHandler(svc)
+			code, body := doSupplierJSON(t, http.MethodPost, "/supplier/products/duplicate", map[string]any{
+				"id": 7,
+			}, func(r *gin.Engine) {
+				r.POST("/supplier/products/duplicate", withSupplier(10), h.Duplicate)
+			})
+			if code != tc.wantCode {
+				t.Errorf("status = %d, want %d", code, tc.wantCode)
+			}
+			if body["code"] != tc.wantStr {
+				t.Errorf("code = %v, want %v", body["code"], tc.wantStr)
+			}
+		})
+	}
+}
