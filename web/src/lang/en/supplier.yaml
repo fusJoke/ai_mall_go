@@ -1,0 +1,121 @@
+# B 端 supplier i18n (English) — add-trading-card-blindbox-mvp task 6.3.
+login:
+  title: Supplier Login
+  subtitle: Business console for card suppliers
+  username: Username
+  password: Password
+  remember: Remember me for 30 days
+  submit: Sign In
+  loading: Signing in...
+  invalidCredentials: Invalid username or password
+  invalidCaptcha: Captcha verification failed, please retry
+  accountDisabled: Account disabled, contact the platform
+  failed: Login failed, please retry
+  gotoUser: Member portal
+products:
+  title: Blind Box Products
+  create: New Blind Box
+  edit: Edit
+  columns:
+    id: ID
+    name: Name
+    cover: Cover
+    price: Price
+    onSale: On Sale
+    isFeatured: Featured
+    status: Status
+    createdAt: Created At
+  dialog:
+    create: New Blind Box (with pool)
+    edit: Edit Blind Box
+    name: Name
+    cover: Cover URL
+    price: Price
+    description: Description
+    poolItems: Pool Items
+    addPoolItem: Add Card
+    cardId: Card ID
+    rarity: Rarity
+    weight: Weight
+    stock: Stock
+    weightSum: Weight Sum (must be 10000)
+    weightSumInvalid: Pool item weights must sum to 10000
+    save: Save
+    cancel: Cancel
+  action:
+    onSale: Put On Sale
+    offSale: Take Off Sale
+  statusActive: Active
+  statusDisabled: Disabled
+promotions:
+  title: Limited-Time Promotions
+  create: New Promotion
+  columns:
+    id: ID
+    blindBox: Blind Box
+    originalPrice: Original
+    promoPrice: Promo
+    startAt: Start
+    endAt: End
+    status: Status
+  dialog:
+    create: New Promotion
+    blindBoxId: Blind Box ID
+    originalPrice: Original Price
+    promoPrice: Promo Price
+    promoPriceInvalid: Promo price must be lower than original
+    timeRange: Time Window
+    save: Save
+    cancel: Cancel
+  action:
+    toggle: Toggle
+    delete: Delete
+    edit: Edit Price
+  confirmDelete: Delete this promotion?
+  statusActive: Active
+  statusDisabled: Disabled
+  timeOverlap: Time window overlaps an existing promotion
+  invalidTimeWindow: End time must be after start time
+  invalidPrice: Promo price must be lower than original price
+seckill:
+  title: Flash Sales
+  create: New Flash Sale
+  editTitle: Edit Flash Sale
+  createTitle: New Flash Sale
+  backToList: Back to Flash Sales
+  columns:
+    id: ID
+    blindBox: Blind Box
+    seckillPrice: Flash Price
+    totalStock: Total Slots
+    perUserLimit: User Limit
+    startAt: Start
+    endAt: End
+    redis: Redis Stock
+    status: Status
+  redisReady: Initialized
+  redisMissing: Not Initialized
+  statusActive: Active
+  statusDisabled: Disabled
+  action:
+    label: Actions
+    edit: Edit
+    toggle: Toggle
+  form:
+    blindBoxId: Blind Box ID
+    seckillPrice: Flash Price (¥)
+    priceHint: Must be lower than the box original price
+    totalStock: Total Slots
+    stockHint: Must not exceed the card pool remaining stock
+    perUserLimit: Per-user Limit
+    timeRange: Sale Window
+    windowHint: Window and blind box cannot be changed after creation
+    save: Save
+    cancel: Cancel
+  invalidTimeWindow: End time must be after start time, and start time cannot be in the past
+  invalidPrice: Flash price must be positive and lower than the original price
+  stockExceedsPool: Total slots exceed the card pool remaining stock
+  forbidden: This blind box does not belong to the current supplier
+  notFound: Flash sale not found
+  redisInitFailed: Redis stock initialization failed, please retry
+  failed: Operation failed, please retry

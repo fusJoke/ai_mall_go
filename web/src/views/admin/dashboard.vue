@@ -3,6 +3,9 @@ import { computed } from 'vue'
 import { useAdminInfo } from '/@/stores/adminInfo'
 import { useConfig } from '/@/stores/config'
 
+// 组件名与静态路由 name（adminDashboard）一致，供布局 keep-alive include 匹配。
+defineOptions({ name: 'adminDashboard' })
+
 // 注意：本视图所有 KPI 数值均为演示数据，非真实业务指标。
 // 接入真实数据时，把下面 `kpis` 换成响应式 ref 即可，无需修改模板。
 const kpis: ReadonlyArray<{ key: string; label: string; value: number; icon: string }> = [

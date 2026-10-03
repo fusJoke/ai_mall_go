@@ -20,6 +20,8 @@ import axios, {
 } from 'axios'
 import { ElMessage } from 'element-plus'
 import { useAdminInfo } from '/@/stores/adminInfo'
+import { useUserInfo } from '/@/stores/user/userInfo'
+import { useSupplierInfo } from '/@/stores/supplier/supplierInfo'
 import { startLoading, stopLoading } from '/@/utils/http/loadingService'
 import { addPending, removePending, type DedupableConfig } from '/@/utils/http/pendingRequests'
 
@@ -105,6 +107,11 @@ instance.interceptors.request.use((config) => {
     const opts = config.__opts ?? {}
 
     // 1) 自动携带 token
+    //
+    // final review Important #4：只在调用方没有显式传 Authorization 时才注入
+    // admin token。user / supplier API 层会按各自 store 显式携带自己的
+    // Bearer token（三端同源共存），此前无条件覆盖会让 C/B 端请求带上
+    // admin token 而 401（token_type_mismatch）。
     try {
         const adminInfo = useAdminInfo()
         if (adminInfo.token) {
@@ -113,7 +120,9 @@ instance.interceptors.request.use((config) => {
             } else if (!(config.headers instanceof AxiosHeaders)) {
                 config.headers = new AxiosHeaders(config.headers)
             }
-            config.headers.set('Authorization', `Bearer ${adminInfo.token}`)
+            if (!config.headers.has('Authorization')) {
+                config.headers.set('Authorization', `Bearer ${adminInfo.token}`)
+            }
         }
     } catch {
         // pinia 未注册 / SSR 环境静默忽略
@@ -182,10 +191,21 @@ instance.interceptors.response.use(
             return Promise.reject(error)
         }
 
-        // 401：清理 token，由路由守卫 / 调用方决定跳转
+        // 401：按请求命名空间清理对应身份的 token，由路由守卫 / 调用方决定跳转。
+        //
+        // final review Important #4：三端（admin/user/supplier）同源共存，
+        // 不能一个 401 就把 admin token 也清掉 —— 例如 C 端 token 过期时
+        // 请求 /user/*，只有会员登录态该失效。
         if (error.response?.status === 401) {
             try {
-                useAdminInfo().removeToken()
+                const url = config.url ?? ''
+                if (url.startsWith('/user')) {
+                    useUserInfo().removeToken()
+                } else if (url.startsWith('/supplier')) {
+                    useSupplierInfo().removeToken()
+                } else {
+                    useAdminInfo().removeToken()
+                }
             } catch {
                 /* noop */
             }

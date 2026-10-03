@@ -64,3 +64,134 @@ rule:
     pidCycle: 不能将规则设为自身或子孙的子节点
     hasChildren: 该规则仍有子节点，请先删除子规则
     notFound: 该菜单规则不存在
+
+log:
+  title: 管理员日志
+  searchPlaceholder: 搜索管理员 / 标题 / 路径 / IP
+  columns:
+    id: ID
+    adminId: 管理员ID
+    username: 管理员
+    title: 操作标题
+    url: 请求路径
+    ip: IP 地址
+    useragent: User-Agent
+    createtime: 操作时间
+  action:
+    detail: 详情
+    delete: 删除
+    batchDelete: 批量删除
+  dialog:
+    detail: 日志详情
+  confirm:
+    delete: 确定要删除该条日志吗？
+    batchDelete: 确定要批量删除选中的日志吗？
+
+group:
+  title: 角色分组
+  searchPlaceholder: 搜索分组名称 / 描述
+  columns:
+    id: ID
+    name: 分组名称
+    description: 描述
+    rules: 权限数
+    status: 状态
+    updatedAt: 更新时间
+  statusOptions:
+    enabled: 启用
+    disabled: 停用
+  dialog:
+    create: 新建角色分组
+    edit: 编辑角色分组
+  action:
+    edit: 编辑
+    toggleStatus: 启停
+    delete: 删除
+  confirm:
+    delete: 确定要删除该角色分组吗？
+
+# mall 业务管理页 i18n —— add-trading-card-blindbox-mvp 任务 6.11。
+mall:
+  common:
+    search: 搜索
+    actions: 操作
+  supplier:
+    statusFilter: 状态筛选
+    featuredFilter: 推荐位筛选
+    nameFilter: 名称关键字
+    featuredYes: 已推荐
+    featuredNo: 未推荐
+    statusActive: 启用
+    statusDisabled: 已禁用
+    disable: 禁用
+    enable: 启用
+    toggleFeatured: 切换推荐位
+    columns:
+      name: 供应商名称
+      contactPhone: 联系电话
+      balance: 待结算余额
+      totalSales: 累计销售额
+      status: 状态
+      isFeatured: 推荐位
+  blindbox:
+    toggleStatus: 切换状态
+    toggleOnSale: 强制上下架
+    toggleFeatured: 切换推荐位
+    columns:
+      cover: 封面
+      name: 盲盒名称
+      supplierId: 供应商 ID
+      price: 原价
+      status: 状态
+      onSale: 在售
+      isFeatured: 推荐位
+  promotion:
+    columns:
+      supplierId: 供应商 ID
+      blindBoxId: 盲盒 ID
+  settlement:
+    title: 结算管理
+    search:
+      placeholder: 搜索供应商 ID
+    columns:
+      id: 结算单 ID
+      supplierId: 供应商 ID
+      supplierName: 供应商
+      periodStart: 周期起始
+      periodEnd: 周期结束
+      totalAmount: 周期总 GMV
+      commissionRate: 手续费率
+      commissionAmount: 手续费
+      payoutAmount: 应打款额
+      status: 状态
+      paidAt: 打款时间
+      createdAt: 创建时间
+    status:
+      pending: 待打款
+      processing: 处理中
+      paid: 已打款
+      failed: 失败
+    action:
+      preview: 预览
+      generate: 生成结算单
+      markPaid: 标记已打款
+      detail: 详情
+    dialog:
+      preview: 结算预览
+      generate: 生成结算单
+      markPaid: 标记已打款
+    form:
+      supplierId: 供应商 ID
+      periodStart: 周期起始 (RFC3339)
+      periodEnd: 周期结束 (RFC3339)
+      id: 结算单 ID
+    message:
+      generateOk: 结算单已生成
+      markPaidOk: 已标记打款
+      previewEmpty: 该周期内无可结算订单
+      confirmMarkPaid: 确定标记为已打款吗？该操作会从供应商余额扣减。
+    detail:
+      settlement: 结算单
+      items: 结算明细
+      orderCount: 订单数
+      orders: 关联订单

@@ -40,6 +40,15 @@ topBarTextColor: Top bar text color
 topBarHoverBackgroundColor: Background color when hovering over the top bar
 topBarMenuActiveItemBackgroundColor: Top bar menu active item background color
 topBarMenuActiveItemTextColor: Top bar menu active item text color
+topBarMenuActiveItemBackgroundFloatingColor: Top bar menu active item background color (floating)
+primaryMenuBackgroundColor: Primary menu background color (LeftSplit)
+primaryMenuActiveItemBackgroundColor: Primary menu active item background color (LeftSplit)
+primaryMenuHoverBackgroundColor: Primary menu hover background color (LeftSplit)
+leftSplitSideMenuWidth: LeftSplit secondary menu width
+nickname: Nickname
+avatar: Avatar
+save: Save
+accountLocalOnlyTip: Example data convention: profile changes only write to local state; server API to be integrated later
 restoreConfigConfirm: Are you sure you want to restore all configurations to the default values?
 restoreDefault: Restore default
 sidebarTopAndBottom: The top and bottom of the sidebar
@@ -71,3 +80,10 @@ closeTab: Close tab
 tabFullscreen: Full screen
 closeOtherTabs: Close other tabs
 closeAllTabs: Close all tabs
+home: Site home
+language: Language
+refresh: Refresh
+menuSearchPlaceholder: Search menu title or path, Enter to navigate
+collapseMenu: Collapse menu
+expandMenu: Expand menu
+lastLoginTime: Last login

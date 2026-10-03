@@ -40,6 +40,15 @@ topBarTextColor: 顶栏文字色
 topBarHoverBackgroundColor: 顶栏悬停时背景色
 topBarMenuActiveItemBackgroundColor: 顶栏菜单激活项背景色
 topBarMenuActiveItemTextColor: 顶栏菜单激活项文字色
+topBarMenuActiveItemBackgroundFloatingColor: 顶栏菜单激活项背景色（悬浮态）
+primaryMenuBackgroundColor: 主菜单背景色（左分布局）
+primaryMenuActiveItemBackgroundColor: 主菜单激活项背景色（左分布局）
+primaryMenuHoverBackgroundColor: 主菜单悬停时背景色（左分布局）
+leftSplitSideMenuWidth: 左分布局次级菜单宽度
+nickname: 昵称
+avatar: 头像
+save: 保存
+accountLocalOnlyTip: 示例数据约定：资料修改仅写入本地状态，服务端接口后续接入
 restoreConfigConfirm: 确定要恢复全部配置到默认值吗？
 restoreDefault: 恢复默认
 sidebarTopAndBottom: 侧边栏的顶部与底部
@@ -71,3 +80,10 @@ closeTab: 关闭标签
 tabFullscreen: 当前标签全屏
 closeOtherTabs: 关闭其他标签
 closeAllTabs: 关闭全部标签
+home: 站点主页
+language: 语言
+refresh: 刷新
+menuSearchPlaceholder: 搜索菜单标题或路径，回车跳转
+collapseMenu: 收起菜单
+expandMenu: 展开菜单
+lastLoginTime: 上次登录

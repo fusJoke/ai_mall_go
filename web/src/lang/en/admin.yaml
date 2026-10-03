@@ -62,3 +62,134 @@ rule:
     pidCycle: A rule cannot be set as the child of itself or its descendants
     hasChildren: This rule still has children; please delete them first
     notFound: The menu rule does not exist
+
+log:
+  title: Admin Log
+  searchPlaceholder: Search admin / title / url / IP
+  columns:
+    id: ID
+    adminId: Admin ID
+    username: Admin
+    title: Title
+    url: Request URL
+    ip: IP Address
+    useragent: User-Agent
+    createtime: Time
+  action:
+    detail: Detail
+    delete: Delete
+    batchDelete: Batch Delete
+  dialog:
+    detail: Log Detail
+  confirm:
+    delete: Are you sure to delete this log?
+    batchDelete: Are you sure to batch delete the selected logs?
+
+group:
+  title: Role Group
+  searchPlaceholder: Search group name / description
+  columns:
+    id: ID
+    name: Group Name
+    description: Description
+    rules: Rules
+    status: Status
+    updatedAt: Updated At
+  statusOptions:
+    enabled: Enabled
+    disabled: Disabled
+  dialog:
+    create: Create Role Group
+    edit: Edit Role Group
+  action:
+    edit: Edit
+    toggleStatus: Toggle Status
+    delete: Delete
+  confirm:
+    delete: Are you sure to delete this role group?
+
+# mall business admin pages i18n — add-trading-card-blindbox-mvp task 6.11.
+mall:
+  common:
+    search: Search
+    actions: Actions
+  supplier:
+    statusFilter: Status
+    featuredFilter: Featured
+    nameFilter: Name keyword
+    featuredYes: Featured
+    featuredNo: Normal
+    statusActive: Active
+    statusDisabled: Disabled
+    disable: Disable
+    enable: Enable
+    toggleFeatured: Toggle Featured
+    columns:
+      name: Name
+      contactPhone: Contact Phone
+      balance: Pending Balance
+      totalSales: Total Sales
+      status: Status
+      isFeatured: Featured
+  blindbox:
+    toggleStatus: Toggle Status
+    toggleOnSale: Force On/Off Sale
+    toggleFeatured: Toggle Featured
+    columns:
+      cover: Cover
+      name: Name
+      supplierId: Supplier ID
+      price: Price
+      status: Status
+      onSale: On Sale
+      isFeatured: Featured
+  promotion:
+    columns:
+      supplierId: Supplier ID
+      blindBoxId: Blind Box ID
+  settlement:
+    title: Settlements
+    search:
+      placeholder: Search supplier ID
+    columns:
+      id: Settlement ID
+      supplierId: Supplier ID
+      supplierName: Supplier
+      periodStart: Period Start
+      periodEnd: Period End
+      totalAmount: Total GMV
+      commissionRate: Commission Rate
+      commissionAmount: Commission
+      payoutAmount: Payout
+      status: Status
+      paidAt: Paid At
+      createdAt: Created At
+    status:
+      pending: Pending
+      processing: Processing
+      paid: Paid
+      failed: Failed
+    action:
+      preview: Preview
+      generate: Generate Settlement
+      markPaid: Mark Paid
+      detail: Detail
+    dialog:
+      preview: Settlement Preview
+      generate: Generate Settlement
+      markPaid: Mark Paid
+    form:
+      supplierId: Supplier ID
+      periodStart: Period Start (RFC3339)
+      periodEnd: Period End (RFC3339)
+      id: Settlement ID
+    message:
+      generateOk: Settlement generated
+      markPaidOk: Marked as paid
+      previewEmpty: No orders to settle in this period
+      confirmMarkPaid: Mark as paid? This will deduct from supplier balance.
+    detail:
+      settlement: Settlement
+      items: Items
+      orderCount: Order Count
+      orders: Linked Orders

@@ -13,3 +13,19 @@ adminManager: Admin Manager
 adminRule: Menu Rule
 Dashboard: Dashboard
 Loading: Loading
+userHome: Card Mall
+userBlindbox: Blind Box Detail
+userOrders: My Orders
+userOrderDetail: Order Detail
+userSeckill: Flash Sale
+userSeckillDetail: Flash Sale Detail
+userFollow: My Following
+supplierCenter: Supplier Center
+supplierProducts: Blind Box Products
+supplierProductEdit: Edit Blind Box
+supplierSeckill: Flash Sales
+supplierSeckillEdit: Edit Flash Sale
+adminSupplier: Suppliers
+adminBlindbox: Blind Boxes
+adminPromotion: Promotions
+adminSettlement: Settlements

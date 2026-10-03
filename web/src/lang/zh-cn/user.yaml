@@ -1,0 +1,101 @@
+# C 端会员侧 i18n —— add-trading-card-blindbox-mvp 任务 6.3。
+# 按业务页嵌套分组（与 admin.yaml 风格一致）。
+login:
+  title: 会员登录
+  subtitle: 抽球星卡，从登录开始
+  username: 用户名
+  password: 密码
+  remember: 记住我 30 天
+  submit: 登录
+  loading: 登录中...
+  invalidCredentials: 用户名或密码错误
+  invalidCaptcha: 验证码校验失败，请重试
+  accountDisabled: 账号已被禁用
+  failed: 登录失败，请重试
+  gotoSupplier: 供应商入驻入口
+home:
+  title: 热门推荐
+  suppliers: 推荐卡商
+  blindBoxCount: 在售盲盒
+  viewDetail: 去拆盒
+  price: 单盒价格
+  empty: 暂无推荐内容，运营同步后即可浏览
+  searchUnavailable: 推荐服务暂不可用，请稍后重试
+blindbox:
+  probability: 概率公示
+  stock: 剩余库存
+  originalPrice: 原价
+  promotionPrice: 限时特价
+  promotionEnds: 活动截止
+  draw: 立即抽卡
+  drawing: 抽卡中...
+  soldOut: 已售罄
+  buyDisabled: 暂不可购
+  poolPreview: 卡池预览
+  drawSuccess: 恭喜抽中
+  soldOutMsg: 手慢了，卡池已售罄
+  insufficientBalance: 余额不足，请先充值
+  notAvailable: 盲盒已下架或不可购买
+  rateLimited: 操作太频繁，请稍后再试
+  drawFailed: 抽卡失败，请重试
+  loginRequired: 请先登录
+  followBtn: 关注卡商
+  followBtnActive: 已关注
+follow:
+  title: 我的关注
+  empty: 还没有关注的供应商，去发现喜欢的卡商吧
+  unfollow: 已取消关注
+  followedAt: 关注时间
+  viewBlindbox: 查看盲盒
+  loginRequired: 请先登录查看关注列表
+orders:
+  title: 我的订单
+  orderNo: 订单号
+  price: 实付金额
+  status: 状态
+  source: 来源
+  createdAt: 下单时间
+  action: 操作
+  viewDetail: 详情
+  empty: 还没有抽卡记录，去首页逛逛吧
+  statusPaid: 已支付
+  statusDrawn: 已抽中
+  statusFailed: 失败
+  statusPending: 待支付
+  sourceNormal: 普通抽卡
+  sourceSeckill: 秒杀
+  items: 抽中明细
+  rarity: 稀有度
+  cardName: 卡名
+  backToList: 返回订单列表
+  notFound: 订单不存在或无权查看
+seckill:
+  title: 限时秒杀
+  subtitle: 星卡好价，手慢无
+  tag: 秒杀
+  empty: 当前没有进行中的秒杀活动
+  sold: 已抢 {sold}/{total}
+  stockUnknown: 名额未知
+  ended: 活动已结束
+  limitUnit: 件
+  backToList: 返回秒杀列表
+  perUserLimit: 限购规则
+  totalStock: 秒杀总名额
+  remaining: 剩余名额
+  window: 活动时间
+  startsIn: 距开抢
+  endsIn: 距结束
+  notStarted: 未开始
+  draw: 立即秒杀
+  drawing: 秒杀中...
+  soldOut: 已抢光
+  soldOutMsg: 手慢了，秒杀名额已被抢光
+  userLimitExceeded: 已达每用户限购上限
+  insufficientBalance: 余额不足，请先充值
+  notInWindow: 不在活动时间内
+  notAvailable: 活动不存在或已结束
+  blindboxNotAvailable: 秒杀关联的盲盒已下架
+  rateLimited: 操作太频繁，请稍后再试
+  loginRequired: 请先登录
+  drawFailed: 秒杀失败，请重试
+  viewBlindbox: 查看盲盒详情
