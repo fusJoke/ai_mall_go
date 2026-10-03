@@ -18,6 +18,22 @@ const (
 	StatusDisabled MallBlindBoxStatus = "disabled" // 禁用
 )
 
+// MallBlindBoxLifecycle 商品生命周期枚举（商品即批次，openspec: add-batch-settlement）。
+//   - LifecycleSelling：本批货销售中（承接新订单）
+//   - LifecycleSoldOut：售罄（draw 事务内自动触发，进入结算流程）
+//   - LifecycleSettled：已结算归档（账单 paid 后自动落定，终态）
+//
+// 与 Status/OnSale 正交：下架（on_sale=false）可逆且不触发结算；
+// 售罄不可逆进入结算流。admin 禁用（status=disabled）仅屏蔽展示。
+type MallBlindBoxLifecycle string
+
+// 商品生命周期枚举值。
+const (
+	LifecycleSelling MallBlindBoxLifecycle = "selling"  // 销售中
+	LifecycleSoldOut MallBlindBoxLifecycle = "sold_out" // 售罄·结算中
+	LifecycleSettled MallBlindBoxLifecycle = "settled"  // 已结算·归档
+)
+
 // MallBlindBox 盲盒 SKU（supplier_id NOT NULL，纯多供应商模式）。
 //
 // 关键设计：
@@ -51,6 +67,10 @@ type MallBlindBox struct {
 
 	// OnSale 是否在售：true=在售 / false=下架。
 	OnSale bool `json:"on_sale" gorm:"comment:是否在售(1在售,0下架);default:true;not null;index:idx_mall_blind_boxes_supplier_status_onsale,priority:2;index:idx_mall_blind_boxes_featured_status_onsale,priority:2"`
+
+	// Lifecycle 商品生命周期：selling=销售中 / sold_out=售罄结算中 / settled=已结算归档。
+	// 售罄由 draw 事务内自动触发（扣减后 pool_total_stock=0）；账单 paid 后置 settled。
+	Lifecycle MallBlindBoxLifecycle `json:"lifecycle" gorm:"comment:生命周期(selling=销售中,sold_out=售罄结算中,settled=已结算归档);size:16;default:'selling';not null;index:idx_mall_blind_boxes_supplier_lifecycle,priority:2"`
 
 	// IsFeatured 是否推荐：true=推荐 / false=普通。
 	// 推荐 + 启用 + 在售 三条件 AND 才会进 ES 首页 feed。

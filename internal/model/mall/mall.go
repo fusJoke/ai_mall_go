@@ -40,6 +40,8 @@ func init() {
 		MallSettlement{},
 		MallSettlementItem{},
 		MallPlatformLedger{},
+		MallSettlementBill{},
+		MallSettlementBillItem{},
 		MallSeckillActivity{},
 		MallStockDeductionLog{},
 	)
