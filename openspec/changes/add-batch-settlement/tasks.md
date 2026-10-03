@@ -4,13 +4,13 @@
 
 ## 1. 数据层与状态机
 
-- [ ] 1.1 迁移 `000015_mall_batch_settlement.{up,down}.sql`：`mall_blind_boxes` 加 `lifecycle varchar(16) NOT NULL DEFAULT 'selling'` + 索引 `(supplier_id, lifecycle)`；建 `mall_settlement_bills`（`blind_box_id` UK + `(supplier_id,status,created_at)` + `(status,created_at)`）；建 `mall_settlement_bill_items`（`draw_order_id` UK + `(bill_id)`）。验收：`migrate up` + down 可逆
-- [ ] 1.2 `internal/model/mall/settlement_bill.go`：`MallSettlementBill` / `MallSettlementBillItem` + `MallSettlementBillStatus` 枚举（generated/confirmed/rejected/failed/paid）；`blind_box.go` 加 `MallBlindBoxLifecycle` 常量（Selling/SoldOut/Settled）+ `lifecycle` 字段；`mall.go` 注册。验收：`go build ./...`
-- [ ] 1.3 `internal/domain/state/settlement_bill_state.go`：`BillStates` 集合 + 合法转换表（generated→confirmed/rejected；confirmed→paid/failed；rejected→generated；failed→confirmed；paid 终态）+ 单测（合法/自迁/跳跃/逆向/跨类型全拒绝）。验收：`go test ./internal/domain/state/`
+- [x] 1.1 迁移 `000015_mall_batch_settlement.{up,down}.sql`：`mall_blind_boxes` 加 `lifecycle varchar(16) NOT NULL DEFAULT 'selling'` + 索引 `(supplier_id, lifecycle)`；建 `mall_settlement_bills`（`blind_box_id` UK + `(supplier_id,status,created_at)` + `(status,created_at)`）；建 `mall_settlement_bill_items`（`draw_order_id` UK + `(bill_id)`）。验收：`migrate up` + down 可逆
+- [x] 1.2 `internal/model/mall/settlement_bill.go`：`MallSettlementBill` / `MallSettlementBillItem` + `MallSettlementBillStatus` 枚举（generated/confirmed/rejected/failed/paid）；`blind_box.go` 加 `MallBlindBoxLifecycle` 常量（Selling/SoldOut/Settled）+ `lifecycle` 字段；`mall.go` 注册。验收：`go build ./...`
+- [x] 1.3 `internal/domain/state/settlement_bill_state.go`：`BillStates` 集合 + 合法转换表（generated→confirmed/rejected；confirmed→paid/failed；rejected→generated；failed→confirmed；paid 终态）+ 单测（合法/自迁/跳跃/逆向/跨类型全拒绝）。验收：`go test ./internal/domain/state/`
 
 ## 2. Repository 层
 
-- [ ] 2.1 `internal/repository/mall/settlement_bill_repository.go`：`CreateWithItems`（账单+明细同事务）、`GetByID`（带 items）、`GetByBoxID`、`ListBySupplier`（分页+status 筛选）、`ListAdmin`（分页+status+supplier 筛选）、`UpdateStatus`（CAS：WHERE status=期望态，返回 RowsAffected）、`Regenerate`（金额更新+version+1+回 generated，CAS）+ sqlmock 单测。验收：`go test ./internal/repository/mall/`
+- [x] 2.1 `internal/repository/mall/settlement_bill_repository.go`：`CreateWithItems`（账单+明细同事务）、`GetByID`（带 items）、`GetByBoxID`、`ListBySupplier`（分页+status 筛选）、`ListAdmin`（分页+status+supplier 筛选）、`UpdateStatus`（CAS：WHERE status=期望态，返回 RowsAffected）、`Regenerate`（金额更新+version+1+回 generated，CAS）+ sqlmock 单测。验收：`go test ./internal/repository/mall/`
 
 ## 3. Service 层（TDD：先测后码）
 
