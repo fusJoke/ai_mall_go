@@ -23,10 +23,10 @@ import (
 	"os"
 	"time"
 
+	gormmysql "github.com/go-sql-driver/mysql" // 导入即注册 mysql driver，且用于 cfg.FormatDSN()
 	migratelib "github.com/golang-migrate/migrate/v4"
 	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	gormmysql "github.com/go-sql-driver/mysql" // 导入即注册 mysql driver，且用于 cfg.FormatDSN()
 
 	"ai-go-mall/internal/infra/config"
 )
@@ -301,21 +301,25 @@ func (m *Migrator) maxLocalVersion() (int, error) {
 //
 // 走 go-sql-driver/mysql 的 Config + FormatDSN()，与 internal/infra/database
 // 包所用方式一致；关键在于 FormatDSN 会自动转义 user/pass/dbname 中的特殊字符
-//（@, :, /, ?, &），手工 fmt.Sprintf 拼字符串会注入风险（Codex review #4）。
+// （@, :, /, ?, &），手工 fmt.Sprintf 拼字符串会注入风险（Codex review #4）。
 //
 // 与 database 包唯一的差异：额外带 multiStatements 让 .up.sql 文件里的多条 DDL
 // 可一次性执行；loc=Local 与 ParseTime 与 database 保持一致。
 func buildMySQLDSN(c config.DBInstanceConfig) string {
 	cfg := gormmysql.Config{
-		User:             c.Username,
-		Passwd:           c.Password,
-		Net:              "tcp",
-		Addr:             fmt.Sprintf("%s:%d", c.Host, c.Port),
-		DBName:           c.DBName,
-		ParseTime:        true,
-		Loc:              time.Local,
-		MultiStatements:  true,
-		Params:           map[string]string{"charset": "utf8mb4"},
+		User:            c.Username,
+		Passwd:          c.Password,
+		Net:             "tcp",
+		Addr:            fmt.Sprintf("%s:%d", c.Host, c.Port),
+		DBName:          c.DBName,
+		ParseTime:       true,
+		Loc:             time.Local,
+		MultiStatements: true,
+		// 同 internal/infra/database：字面量构造不会带上 mysql.NewConfig() 的
+		// 默认值，AllowNativePasswords 零值是 false，会让 native password 账号
+		// 直接连不上（迁移与运行时用的是同一个业务账号，必须一致）。
+		AllowNativePasswords: true,
+		Params:               map[string]string{"charset": "utf8mb4"},
 	}
 	return cfg.FormatDSN()
 }

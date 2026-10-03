@@ -15,8 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/handler"
+	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/model"
 	"ai-go-mall/internal/repository"
@@ -696,7 +696,7 @@ func (h *Handler) BatchDelete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"deleted":       deleted,
+		"deleted":      deleted,
 		"skipped_self": skippedSelf,
 	})
 }

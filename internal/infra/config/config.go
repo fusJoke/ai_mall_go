@@ -150,6 +150,11 @@ type Config struct {
 	CORS     CORSConfig     `mapstructure:"cors"`
 	Captcha  CaptchaConfig  `mapstructure:"captcha"`
 	Upload   UploadConfig   `mapstructure:"upload"`
+	Cache    CacheConfig    `mapstructure:"cache"`
+	Search   SearchConfig   `mapstructure:"search"`
+	Mall     MallConfig     `mapstructure:"mall"`
+	MQ       MQConfig       `mapstructure:"mq"`
+	Channel  ChannelConfig  `mapstructure:"channel"`
 }
 
 // TokenConfig token 存储配置。
@@ -202,6 +207,118 @@ type UploadConfig struct {
 type UploadLocalConfig struct {
 	BaseDir   string `mapstructure:"base_dir"`
 	URLPrefix string `mapstructure:"url_prefix"`
+}
+
+// CacheConfig 缓存配置（mall MVP 设计 D5 / D16）。
+//
+// Driver 决定 Init 装配哪种 Cache 实现：
+//   - "redis"（默认）：仅 Redis（单层，兼容旧部署）
+//   - "multi"：L1 内存 + L2 Redis 双层（Phase 10 落地后推荐）
+//
+// Cache 接口保持稳定：业务代码不感知层级，仅 Init 根据 driver 选实现。
+type CacheConfig struct {
+	Driver string            `mapstructure:"driver"`
+	Redis  RedisConfig       `mapstructure:"redis"`
+	Memory MemoryCacheConfig `mapstructure:"memory"`
+	TTL    CacheTTLConfig    `mapstructure:"ttl"`
+}
+
+// MemoryCacheConfig L1 进程内内存缓存配置（D16）。
+//
+// 选型 github.com/patrickmn/go-cache，详见 internal/infra/cache/driver/memory.go。
+type MemoryCacheConfig struct {
+	DefaultTTL      time.Duration `mapstructure:"default_ttl"`
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
+	// MaxSize 容量上限（条目数）。当前 go-cache v2.1.0 未启用，
+	// 保留字段供后续版本或自定义实现接入。
+	MaxSize int `mapstructure:"max_size"`
+}
+
+// CacheTTLConfig 各业务场景的 L1 / L2 TTL（D5 场景表）。
+//
+// 业务代码读取此配置决定每次 Set 传什么 TTL：
+//   - BlindBoxDetail.L1 / BlindBoxDetail.L2 分别传给 L1 和 L2（MultiLevelCache
+//     不感知本配置，业务侧自行处理两层差异）。
+//   - DrawRate.L2 是「限流场景」专属：限流永远走 L2 Redis（不走 L1），故仅 L2 字段。
+//
+// 为什么放在配置而非业务常量：TTL 是「部署可调参数」，不同环境（开发 / 灰度 / 生产）
+// 可以走不同值。生产可调短（控内存），开发可调长（方便调试）。
+type CacheTTLConfig struct {
+	BlindBoxDetail BlindBoxDetailTTL `mapstructure:"blindbox_detail"`
+	HomeFeed       HomeFeedTTL       `mapstructure:"home_feed"`
+	DrawRate       DrawRateTTL       `mapstructure:"draw_rate"`
+}
+
+// BlindBoxDetailTTL 盲盒详情缓存 TTL。
+type BlindBoxDetailTTL struct {
+	L1 time.Duration `mapstructure:"l1"`
+	L2 time.Duration `mapstructure:"l2"`
+}
+
+// HomeFeedTTL 首页 feed 缓存 TTL。
+type HomeFeedTTL struct {
+	L1 time.Duration `mapstructure:"l1"`
+	L2 time.Duration `mapstructure:"l2"`
+}
+
+// DrawRateTTL 抽卡限流 TTL（仅 L2）。
+type DrawRateTTL struct {
+	L2 time.Duration `mapstructure:"l2"`
+}
+
+// RedisConfig 单实例 Redis 连接配置。
+type RedisConfig struct {
+	Driver   string `mapstructure:"driver"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	PoolSize int    `mapstructure:"pool_size"`
+}
+
+// SearchConfig Elasticsearch 搜索配置（mall MVP 设计 D6）。
+type SearchConfig struct {
+	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
+}
+
+// ElasticsearchConfig ES 客户端连接配置。
+type ElasticsearchConfig struct {
+	Addresses   []string `mapstructure:"addresses"`
+	Username    string   `mapstructure:"username"`
+	Password    string   `mapstructure:"password"`
+	IndexPrefix string   `mapstructure:"index_prefix"`
+}
+
+// MallConfig mall 业务配置。
+//
+// 当前仅暴露 default_commission_rate；其他 mall 业务配置
+// （如抽卡限流 N、活动价策略等）按需扩展。
+type MallConfig struct {
+	DefaultCommissionRate float64 `mapstructure:"default_commission_rate"`
+}
+
+// MQConfig 消息队列配置（mall MVP 设计 D17）。
+//
+// Driver 决定 Init 装配哪种 MQ 实现：
+//   - "redis"（默认）：Redis Stream（生产推荐）
+//   - "mock"：进程内 mock（仅单测用，禁止生产）
+//
+// 后续扩展：kafka / rabbitmq（同 cache 模式，仅新增 driver + 切换 driver 字段）。
+type MQConfig struct {
+	Driver        string        `mapstructure:"driver"`
+	Redis         RedisConfig   `mapstructure:"redis"`
+	ConsumerGroup string        `mapstructure:"consumer_group"`
+	BlockTimeout  time.Duration `mapstructure:"block_timeout"`
+}
+
+// ChannelConfig 第三方渠道配置（mall MVP 设计 D18）。
+//
+// 三个字段是各渠道的 driver 名，取值域 = internal/infra/channel/factory.go
+// 的 drivers 注册表（当前 mock / bank）；未知名由 channel.Init() fail fast。
+type ChannelConfig struct {
+	Payment string `mapstructure:"payment"`
+	Bank    string `mapstructure:"bank"`
+	SMS     string `mapstructure:"sms"`
 }
 
 // CORSConfig 跨域配置。
@@ -304,5 +421,56 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Upload.Local.URLPrefix == "" {
 		c.Upload.Local.URLPrefix = "/uploads"
+	}
+
+	// Cache 默认值：driver 默认 "redis"（向后兼容旧部署）；
+	// memory 用 D16 推荐值（default_ttl=10s / cleanup=60s）。
+	if c.Cache.Driver == "" {
+		c.Cache.Driver = "redis"
+	}
+	if c.Cache.Memory.DefaultTTL == 0 {
+		c.Cache.Memory.DefaultTTL = 10 * time.Second
+	}
+	if c.Cache.Memory.CleanupInterval == 0 {
+		c.Cache.Memory.CleanupInterval = 60 * time.Second
+	}
+	// 各场景 TTL 缺省：L1 短 / L2 长（D5 表推荐值）。
+	if c.Cache.TTL.BlindBoxDetail.L1 == 0 {
+		c.Cache.TTL.BlindBoxDetail.L1 = 10 * time.Second
+	}
+	if c.Cache.TTL.BlindBoxDetail.L2 == 0 {
+		c.Cache.TTL.BlindBoxDetail.L2 = 10 * time.Minute
+	}
+	if c.Cache.TTL.HomeFeed.L1 == 0 {
+		c.Cache.TTL.HomeFeed.L1 = 5 * time.Second
+	}
+	if c.Cache.TTL.HomeFeed.L2 == 0 {
+		c.Cache.TTL.HomeFeed.L2 = 5 * time.Minute
+	}
+	if c.Cache.TTL.DrawRate.L2 == 0 {
+		c.Cache.TTL.DrawRate.L2 = 60 * time.Second
+	}
+
+	// MQ 默认值：driver 默认 redis；consumer_group 默认 mall-stock-sync；block_timeout 5s。
+	if c.MQ.Driver == "" {
+		c.MQ.Driver = "redis"
+	}
+	if c.MQ.ConsumerGroup == "" {
+		c.MQ.ConsumerGroup = "mall-stock-sync"
+	}
+	if c.MQ.BlockTimeout == 0 {
+		c.MQ.BlockTimeout = 5 * time.Second
+	}
+
+	// Channel 默认值：三渠道全 mock（MVP 模拟支付 / 手动 mark_paid，D18）；
+	// config/channel.yaml 缺失时也能启动。
+	if c.Channel.Payment == "" {
+		c.Channel.Payment = "mock"
+	}
+	if c.Channel.Bank == "" {
+		c.Channel.Bank = "mock"
+	}
+	if c.Channel.SMS == "" {
+		c.Channel.SMS = "mock"
 	}
 }

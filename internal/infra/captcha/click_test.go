@@ -31,8 +31,8 @@ type mockRepo struct {
 	expiredCalls atomic.Int32
 
 	// 持久化在内存中的 key→Captcha 副本；方便 VerifyClick_MaxFailTriggersDelete 之类测试断言 DeleteByKey 后的状态。
-	store   map[string]model.Captcha
-	keyMu   sync.Mutex
+	store map[string]model.Captcha
+	keyMu sync.Mutex
 }
 
 func newMockRepo() *mockRepo {
@@ -240,7 +240,7 @@ func TestVerifyClick_Success_ExactCoord(t *testing.T) {
 func TestVerifyClick_Success_WithinTolerance(t *testing.T) {
 	cfg := defaultCfg()
 	stored := buildStoredInfo(t,
-		PlacedElem{Name: "A", CX: 100, CY: 80, Kind: KindText},  // 文字容差 14
+		PlacedElem{Name: "A", CX: 100, CY: 80, Kind: KindText}, // 文字容差 14
 		PlacedElem{Name: "B", CX: 50, CY: 50, Kind: KindText},
 	)
 
@@ -274,9 +274,9 @@ func TestVerifyClick_Fail_OutOfTolerance(t *testing.T) {
 
 	// 偏 16px（>容差 14）。
 	req := &VerifyReq{
-		Key: "k",
+		Key:    "k",
 		Points: []Point{{X: 116, Y: 80}, {X: 50, Y: 50}},
-		W: ImageWidth, H: ImageHeight,
+		W:      ImageWidth, H: ImageHeight,
 	}
 	err := m.VerifyClick(context.Background(), req, false)
 	if !errors.Is(err, ErrMismatch) {

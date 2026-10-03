@@ -13,8 +13,8 @@ import (
 
 	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/model"
-	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/repository"
+	adminRepo "ai-go-mall/internal/repository/admin"
 )
 
 // --- mock adminRepo.Repository ---
@@ -25,31 +25,31 @@ import (
 // Update 是哈希入口（管理页部分更新走它），Login MUST NOT 触发 —— 相关用例显式断言
 // updateCalls == 0。其余 CRUD 方法给 no-op 默认实现，保证编译期接口满足。
 type mockRepo struct {
-	getByUsernameFunc    func(c *gin.Context, username string) (*model.Admin, error)
-	updateFunc           func(c *gin.Context, entity *model.Admin) error
-	getByIDFunc          func(c *gin.Context, id int64) (*model.Admin, error)
-	updatePasswordFunc   func(c *gin.Context, id uint, hashed string) error
-	updateStatusFunc     func(c *gin.Context, id uint, status int8) error
+	getByUsernameFunc     func(c *gin.Context, username string) (*model.Admin, error)
+	updateFunc            func(c *gin.Context, entity *model.Admin) error
+	getByIDFunc           func(c *gin.Context, id int64) (*model.Admin, error)
+	updatePasswordFunc    func(c *gin.Context, id uint, hashed string) error
+	updateStatusFunc      func(c *gin.Context, id uint, status int8) error
 	resetLoginFailureFunc func(c *gin.Context, id uint) error
-	deleteBatchFunc      func(c *gin.Context, ids []uint) error
+	deleteBatchFunc       func(c *gin.Context, ids []uint) error
 
 	updateLoginFailureFunc func(c *gin.Context, id uint, failure int, locked bool) error
 	updateLoginSuccessFunc func(c *gin.Context, id uint, ip string, at time.Time) error
 
-	updateCalls    int
-	lastUpdate     *model.Admin
-	getByIDCalls   int
-	lastGetByID    int64
-	updatePwdCalls int
-	lastUpdatePwdID uint
-	lastUpdatePwdHash string
-	updateStatusCalls int
+	updateCalls        int
+	lastUpdate         *model.Admin
+	getByIDCalls       int
+	lastGetByID        int64
+	updatePwdCalls     int
+	lastUpdatePwdID    uint
+	lastUpdatePwdHash  string
+	updateStatusCalls  int
 	lastUpdateStatusID uint
 	lastUpdateStatus   int8
-	resetCalls    int
-	lastResetID   uint
-	deleteBatchCalls int
-	lastDeleteBatch []uint
+	resetCalls         int
+	lastResetID        uint
+	deleteBatchCalls   int
+	lastDeleteBatch    []uint
 
 	updateLoginFailureCalls int
 	lastLoginFailureID      uint
@@ -79,7 +79,7 @@ func (m *mockRepo) Update(c *gin.Context, entity *model.Admin) error {
 }
 
 // 其余 CRUDRepository 方法：no-op 默认实现，仅占位让接口实现完整。
-func (m *mockRepo) Create(c *gin.Context, entity *model.Admin) error   { return nil }
+func (m *mockRepo) Create(c *gin.Context, entity *model.Admin) error { return nil }
 func (m *mockRepo) List(c *gin.Context, opts repository.ListOptions) ([]model.Admin, int64, error) {
 	return nil, 0, nil
 }
@@ -219,8 +219,8 @@ var _ tokenIssuer = (*mockIssuer)(nil)
 type mockCaptcha struct {
 	verifyFunc func(ctx context.Context, req *captchaInfra.VerifyReq, deleteOnSuccess bool) error
 
-	verifyCalls        int
-	lastReq            *captchaInfra.VerifyReq
+	verifyCalls         int
+	lastReq             *captchaInfra.VerifyReq
 	lastDeleteOnSuccess bool
 }
 

@@ -15,10 +15,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/model"
 	adminRepo "ai-go-mall/internal/repository/admin"
-	captchaInfra "ai-go-mall/internal/infra/captcha"
 	"ai-go-mall/internal/service"
 )
 

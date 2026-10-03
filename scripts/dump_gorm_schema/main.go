@@ -38,7 +38,7 @@ func main() {
 		}
 		for _, c := range cols {
 			fmt.Printf("  %s | %s | %s | default=%q | nullable=%v | key=%s | extra=%s | comment=%s\n",
-				c.name, c.colType, c.collation, c.defVal, c.nullable, c.key, c.extra, c.comment)
+				c.name.String, c.colType.String, c.collation.String, c.defVal.String, c.nullable, c.key.String, c.extra.String, c.comment.String)
 		}
 		fmt.Println()
 		idx, err := indexes(db, t)
