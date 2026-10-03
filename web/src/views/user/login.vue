@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import clickCaptcha from '/@/components/clickCaptcha/index'
 import { shortUuid } from '/@/utils/random'
@@ -43,6 +43,7 @@ import { userLogin } from '/@/api/user/auth'
 import { useUserInfo } from '/@/stores/user/userInfo'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const userInfo = useUserInfo()
 
@@ -66,6 +67,13 @@ function describeLoginError(err: unknown): string {
     return t('user.login.failed')
 }
 
+/** 回跳目标：仅接受 /user 开头的站内路径（防开放跳转），否则回首页。 */
+function redirectTarget(): string {
+    const redirect = route.query.redirect
+    if (typeof redirect === 'string' && redirect.startsWith('/user/')) return redirect
+    return '/user/home'
+}
+
 async function submitLogin(captchaKey: string, points: { x: number; y: number }[]) {
     errorMsg.value = ''
     loading.value = true
@@ -85,7 +93,7 @@ async function submitLogin(captchaKey: string, points: { x: number; y: number }[
             avatar: data.user.avatar,
             balance: data.user.balance,
         })
-        router.push('/user/home')
+        router.push(redirectTarget())
     } catch (err) {
         errorMsg.value = describeLoginError(err)
     } finally {

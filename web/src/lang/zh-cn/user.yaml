@@ -69,6 +69,15 @@ orders:
   cardName: 卡名
   backToList: 返回订单列表
   notFound: 订单不存在或无权查看
+drawResult:
+  title: 开盒成功
+  subtitle: 恭喜！本次抽到的卡牌
+  orderNo: 订单号
+  actualPrice: 实付金额
+  viewOrders: 查看订单
+  drawAgain: 再抽一单
+  backHome: 回首页
+  noCards: 本次未返回卡牌信息
 seckill:
   title: 限时秒杀
   subtitle: 星卡好价，手慢无

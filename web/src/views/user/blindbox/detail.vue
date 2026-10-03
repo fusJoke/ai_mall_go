@@ -91,6 +91,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { blindBoxDetail, draw, type BlindBoxDetail as Detail } from '/@/api/user/blindbox'
 import { followSupplier, unfollowSupplier } from '/@/api/user/follow'
+import { saveDrawResult } from '/@/utils/drawResult'
 import { useUserInfo } from '/@/stores/user/userInfo'
 
 const { t } = useI18n()
@@ -170,24 +171,27 @@ function describeDrawError(err: unknown): string {
     return t('user.blindbox.drawFailed')
 }
 
+/** 未登录 / 401 统一引导登录，登录后经 redirect 回跳本页。 */
+function goLogin() {
+    router.push({ path: '/user/login', query: { redirect: route.fullPath } })
+}
+
 async function onDraw() {
     if (!userInfo.token) {
-        router.push('/user/login')
+        goLogin()
         return
     }
     drawing.value = true
     msg.value = ''
     try {
         const { data } = await draw(detail.value!.blind_box.id)
-        const first = data.cards?.[0]
-        show(
-            'success',
-            `${t('user.blindbox.drawSuccess')} ${first ? `[${first.rarity}] ${first.snapshot_name}` : ''}（${t('user.orders.orderNo')} ${data.order_no}）`,
-        )
+        // 成功 → 开卡结果页（仪式感呈现），不再用文字提示。
+        saveDrawResult({ ...data, source_path: `/user/blindbox/${detail.value!.blind_box.id}` })
+        router.push('/user/draw/result')
     } catch (err) {
         const anyErr = err as { response?: { status?: number } }
         if (anyErr?.response?.status === 401) {
-            router.push('/user/login')
+            goLogin()
             return
         }
         show('error', describeDrawError(err))
@@ -200,7 +204,7 @@ async function onDraw() {
 async function onFollowToggle() {
     if (!detail.value?.supplier?.id) return
     if (!userInfo.token) {
-        router.push('/user/login')
+        goLogin()
         return
     }
     const supplierId = detail.value.supplier.id
@@ -219,7 +223,7 @@ async function onFollowToggle() {
         const anyErr = err as { response?: { data?: { code?: string } } }
         const code = anyErr?.response?.data?.code
         if (code === 'follow.unauthorized') {
-            router.push('/user/login')
+            goLogin()
             return
         }
         show('error', t('user.blindbox.drawFailed'))

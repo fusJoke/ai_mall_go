@@ -74,6 +74,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { seckillDetail, seckillDraw, type SeckillDetail as Detail } from '/@/api/user/seckill'
+import { saveDrawResult } from '/@/utils/drawResult'
 import { useUserInfo } from '/@/stores/user/userInfo'
 
 const { t, locale } = useI18n()
@@ -163,26 +164,28 @@ function describeSeckillError(err: unknown): string {
     return t('user.seckill.drawFailed')
 }
 
+/** 未登录 / 401 统一引导登录，登录后经 redirect 回跳本页。 */
+function goLogin() {
+    router.push({ path: '/user/login', query: { redirect: route.fullPath } })
+}
+
 async function onDraw() {
     if (!userInfo.token) {
-        router.push('/user/login')
+        goLogin()
         return
     }
     drawing.value = true
     msg.value = ''
     try {
         const { data } = await seckillDraw(detail.value!.id)
-        const first = data.cards?.[0]
-        show(
-            'success',
-            `${t('user.blindbox.drawSuccess')} ${first ? `[${first.rarity}] ${first.snapshot_name}` : ''}（${t('user.orders.orderNo')} ${data.order_no}）`,
-        )
-        // 抢到了立刻刷新剩余名额，不等下一个轮询周期。
+        // 成功 → 开卡结果页（与普通抽卡共用），跳转前先刷新剩余名额。
         load()
+        saveDrawResult({ ...data, source_path: `/user/seckill/${detail.value!.id}` })
+        router.push('/user/draw/result')
     } catch (err) {
         const anyErr = err as { response?: { status?: number } }
         if (anyErr?.response?.status === 401) {
-            router.push('/user/login')
+            goLogin()
             return
         }
         show('error', describeSeckillError(err))

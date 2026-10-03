@@ -68,6 +68,15 @@ orders:
   cardName: Card
   backToList: Back to Orders
   notFound: Order not found or access denied
+drawResult:
+  title: Unboxed!
+  subtitle: Congrats! Cards drawn this time
+  orderNo: Order No.
+  actualPrice: Amount Paid
+  viewOrders: View Orders
+  drawAgain: Draw Again
+  backHome: Back Home
+  noCards: No card info returned this time
 seckill:
   title: Flash Sale
   subtitle: Hot card deals, first come first served

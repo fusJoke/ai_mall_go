@@ -92,6 +92,15 @@ const userBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 开卡结果页（普通抽卡与秒杀抽卡共用，结果经 sessionStorage 传递）
+            path: 'draw/result',
+            name: 'userDrawResult',
+            component: () => import('/@/views/user/draw/result.vue'),
+            meta: {
+                title: 'pageTitles.userDrawResult',
+            },
+        },
+        {
             // /user 子路径兜底
             path: ':path(.*)*',
             redirect: '/404',
