@@ -144,6 +144,10 @@
 - [x] 11.6 新增 `cmd/stock-sync/main.go`：双模式（消费者 + cron 兜底），订阅 `stock.deduction.sync`，handler UPDATE `synced_to_pool_at`
 - [ ] 11.7 修改 `internal/service/user/draw.go` 的 SeckillDraw：事务提交后 `go mq.Publish(...)`（失败仅 warn）
 - [x] 11.8 单测：MQ Publish / Subscribe + Retry 行为
+- [x] 11.9 修 `.env.yaml.example` 漏 mq 段：`config/mq.yaml` 的 redis.password 留空（按设计意图由
+       `.env.yaml` 覆盖），但模板没列出 mq 段，导致复制 `.example` 后启动遇
+       `init mq: NOAUTH` 失败。commit `b161fb6` 补回 mq 段，并在 design.md Cross-cutting
+       Concerns 加上"敏感字段约定"+ 踩坑记录。
 
 ## 12. 秒杀活动前端
 

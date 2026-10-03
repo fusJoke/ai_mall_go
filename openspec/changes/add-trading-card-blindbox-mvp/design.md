@@ -1089,29 +1089,54 @@ actualTTL = baseTTL + rand[0, baseTTL/4)  // +0%~+25% 正抖动
 
 ### 配置加载
 
-新增两个配置文件：
+新增三个配置文件：
 
 `config/cache.yaml`：
 ```yaml
-redis:
-  host: 127.0.0.1
-  port: 6379
-  password: ""
-  db: 0
-  pool_size: 50
+cache:
+  driver: redis
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password: ""
+    db: 0
+    pool_size: 50
 ```
 
 `config/search.yaml`：
 ```yaml
-elasticsearch:
-  addresses:
-    - http://127.0.0.1:9200
-  username: ""
-  password: ""
-  index_prefix: mall
+search:
+  elasticsearch:
+    addresses:
+      - http://127.0.0.1:9200
+    username: ""
+    password: ""
+    index_prefix: mall
 ```
 
-`config/.env.yaml.example` 同步追加字段。
+`config/mq.yaml`：
+```yaml
+mq:
+  driver: redis
+  consumer_group: mall-stock-sync
+  block_timeout: 5s
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password: ""
+    db: 1           # 与 cache 共用 Redis 实例，但独占 DB 避免 keyspace 冲突
+    pool_size: 20
+```
+
+**敏感字段约定**：`cache.yaml` / `search.yaml` / `mq.yaml` 把 password 留空占位，
+真值由 `.env.yaml` 在本机提供（gitignored，loader 按同名键最高优先级覆盖）。
+`.env.yaml.example` 作为新成员复制模板必须列出**所有**需要覆盖的字段（cache /
+mq / search / database），否则会踩到"`init xxx: NOAUTH` 启动失败"。
+
+实际踩坑（2026-10-03 commit `b161fb6`）：`.env.yaml.example` 最初只列了 cache +
+search + database 三段，**漏了 mq 段**。新人复制 `.example` 后启动
+`cmd/serve` 时 mq init 阶段用空密码连 Redis → `NOAUTH Authentication required`
+→ 进程退出。本 fix 把 mq 段补回模板。
 
 ### 启动期
 
