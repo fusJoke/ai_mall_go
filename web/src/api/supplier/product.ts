@@ -76,7 +76,7 @@ export function supplierProductEdit(data: {
     })
 }
 
-/** 上下架。 */
+/** 上下架。售罄（sold_out）/已结算（settled）批次返回 409 product.lifecycle_forbidden。 */
 export function supplierProductToggleOnSale(id: number, onSale: boolean) {
     const supplierInfo = useSupplierInfo()
     return request.request({
@@ -84,5 +84,17 @@ export function supplierProductToggleOnSale(id: number, onSale: boolean) {
         method: 'POST',
         data: { id, on_sale: onSale },
         headers: { Authorization: `Bearer ${supplierInfo.token}` },
+    })
+}
+
+/** 再来一批：复制历史盲盒卡池生成新批次（下架态，返回新盲盒 ID）。 */
+export function supplierProductDuplicate(id: number) {
+    const supplierInfo = useSupplierInfo()
+    return request.request<{ id: number }>({
+        url: '/supplier/products/duplicate',
+        method: 'POST',
+        data: { id },
+        headers: { Authorization: `Bearer ${supplierInfo.token}` },
+        __opts: { showErrorMessage: false },
     })
 }
