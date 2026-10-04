@@ -48,10 +48,10 @@ export function uuid(): string {
  * @param prefix 前缀
  * @returns 唯一标识
  */
+let uniqueSeq = 0
 export function shortUuid(prefix = ''): string {
     const time = Date.now()
     const random = Math.floor(Math.random() * 1000000000)
-    if (!window.unique) window.unique = 0
-    window.unique++
-    return prefix + '_' + random + window.unique + String(time)
+    uniqueSeq++
+    return prefix + '_' + random + uniqueSeq + String(time)
 }
