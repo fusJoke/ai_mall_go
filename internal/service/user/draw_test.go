@@ -119,6 +119,11 @@ func (m *drawCardPoolRepo) GetPoolByBlindBoxID(c *gin.Context, blindBoxID int64)
 func (m *drawCardPoolRepo) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []int64) ([]mall.MallCardPool, error) {
 	return nil, nil
 }
+
+// DeleteItemsByPoolID UpdatePool 用（draw 域不使用，no-op stub 满足接口）。
+func (m *drawCardPoolRepo) DeleteItemsByPoolID(c *gin.Context, poolID int64) error {
+	return nil
+}
 func (m *drawCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
 	m.listItemsCalls++
 	if m.listItemsByPoolIDFunc != nil {

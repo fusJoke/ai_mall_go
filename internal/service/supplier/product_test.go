@@ -132,12 +132,15 @@ type productCardPoolRepo struct {
 	createPoolFunc        func(f *m_unused_anchor) error // 占位避免编译器报 unused-arg
 	createItemsFunc       func(c *gin.Context, items []mall.MallCardPoolItem) error
 	getPoolFunc           func(c *gin.Context, bbID int64) (*mall.MallCardPool, error)
-	getPoolsFunc          func(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error)
-	listItemsByPoolIDFunc func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
+	getPoolsFunc           func(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error)
+	listItemsByPoolIDFunc  func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
 	listItemsByPoolIDsFunc func(c *gin.Context, poolIDs []int64) ([]mall.MallCardPoolItem, error)
+	deleteItemsFunc        func(c *gin.Context, poolID int64) error
 
 	createPoolCalls, createItemsCalls int
+	deleteItemsCalls                  int
 	lastPoolID                        int64
+	lastDeletedPoolID                 int64
 	lastItems                         []mall.MallCardPoolItem
 }
 
@@ -160,6 +163,14 @@ func (m *productCardPoolRepo) CreateItems(c *gin.Context, items []mall.MallCardP
 	m.lastItems = items
 	if m.createItemsFunc != nil {
 		return m.createItemsFunc(c, items)
+	}
+	return nil
+}
+func (m *productCardPoolRepo) DeleteItemsByPoolID(c *gin.Context, poolID int64) error {
+	m.deleteItemsCalls++
+	m.lastDeletedPoolID = poolID
+	if m.deleteItemsFunc != nil {
+		return m.deleteItemsFunc(c, poolID)
 	}
 	return nil
 }
@@ -429,6 +440,128 @@ func TestProductService_PoolStats_EmptyInput(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Errorf("out = %v, want empty", out)
+	}
+}
+
+// =============================================================================
+// Detail / UpdatePool（任务 5.3：编辑页预填 + 卡池重填闭环）
+// =============================================================================
+
+func TestProductService_Detail_Success(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return &mall.MallBlindBox{ID: 9, SupplierID: 7, Lifecycle: mall.LifecycleSelling}, nil
+	}
+	d.cp.getPoolFunc = func(c *gin.Context, bbID int64) (*mall.MallCardPool, error) {
+		return &mall.MallCardPool{ID: 55, BlindBoxID: 9}, nil
+	}
+	d.cp.listItemsByPoolIDFunc = func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
+		return []mall.MallCardPoolItem{{PoolID: 55, CardID: 1, Stock: 10}}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	box, items, err := svc.Detail(newProductCtx(), 7, 9)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if box.ID != 9 || len(items) != 1 || items[0].Stock != 10 {
+		t.Errorf("box=%+v items=%+v", box, items)
+	}
+}
+
+func TestProductService_Detail_Forbidden(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return &mall.MallBlindBox{ID: 9, SupplierID: 99}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	_, _, err := svc.Detail(newProductCtx(), 7, 9)
+	if !errors.Is(err, ErrBlindBoxForbidden) {
+		t.Errorf("err = %v, want ErrBlindBoxForbidden", err)
+	}
+}
+
+func TestProductService_UpdatePool_Success(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return &mall.MallBlindBox{ID: 9, SupplierID: 7, Lifecycle: mall.LifecycleSelling}, nil
+	}
+	d.do.countDrawnFunc = func(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+		return map[int64]int64{9: 0}, nil // 零订单
+	}
+	d.cp.getPoolFunc = func(c *gin.Context, bbID int64) (*mall.MallCardPool, error) {
+		return &mall.MallCardPool{ID: 55, BlindBoxID: 9}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	items := validItems() // weight 加和 10000
+	err := svc.UpdatePool(newProductCtx(), 7, 9, items)
+	if err != nil {
+		t.Fatalf("UpdatePool: %v", err)
+	}
+	if d.cp.deleteItemsCalls != 1 || d.cp.lastDeletedPoolID != 55 {
+		t.Errorf("delete calls=%d poolID=%d, want 1/55", d.cp.deleteItemsCalls, d.cp.lastDeletedPoolID)
+	}
+	if d.cp.lastItems == nil || len(d.cp.lastItems) != len(items) {
+		t.Fatalf("created items = %v", d.cp.lastItems)
+	}
+	for _, it := range d.cp.lastItems {
+		if it.PoolID != 55 {
+			t.Errorf("item PoolID = %d, want 55（回填新池）", it.PoolID)
+		}
+	}
+	if d.cache.delCalls == 0 {
+		t.Errorf("detail cache should be invalidated")
+	}
+}
+
+func TestProductService_UpdatePool_LifecycleForbidden(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return &mall.MallBlindBox{ID: 9, SupplierID: 7, Lifecycle: mall.LifecycleSoldOut}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	err := svc.UpdatePool(newProductCtx(), 7, 9, validItems())
+	if !errors.Is(err, ErrLifecycleForbidden) {
+		t.Errorf("err = %v, want ErrLifecycleForbidden", err)
+	}
+	if d.cp.deleteItemsCalls != 0 {
+		t.Errorf("delete calls = %d, want 0", d.cp.deleteItemsCalls)
+	}
+}
+
+func TestProductService_UpdatePool_PoolLocked(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+		return &mall.MallBlindBox{ID: 9, SupplierID: 7, Lifecycle: mall.LifecycleSelling}, nil
+	}
+	d.do.countDrawnFunc = func(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+		return map[int64]int64{9: 3}, nil // 已开卖
+	}
+	svc := newProductSvcFromDeps(d)
+
+	err := svc.UpdatePool(newProductCtx(), 7, 9, validItems())
+	if !errors.Is(err, ErrPoolLocked) {
+		t.Errorf("err = %v, want ErrPoolLocked", err)
+	}
+	if d.cp.deleteItemsCalls != 0 {
+		t.Errorf("delete calls = %d, want 0", d.cp.deleteItemsCalls)
+	}
+}
+
+func TestProductService_UpdatePool_InvalidWeightSum(t *testing.T) {
+	d := defaultProductDeps()
+	svc := newProductSvcFromDeps(d)
+
+	bad := []mall.MallCardPoolItem{{CardID: 1, Rarity: mall.RaritySSR, Weight: 1, Stock: 5}}
+	err := svc.UpdatePool(newProductCtx(), 7, 9, bad)
+	if !errors.Is(err, ErrInvalidWeightSum) {
+		t.Errorf("err = %v, want ErrInvalidWeightSum", err)
+	}
+	if d.bb.getByIDCalls != 0 {
+		t.Errorf("ownership check should not run before weight validation")
 	}
 }
 

@@ -76,6 +76,12 @@ type DuplicateRequest struct {
 	ID int64 `json:"id" binding:"required"`
 }
 
+// UpdatePoolRequest 是 POST /supplier/products/update-pool 的请求体。
+type UpdatePoolRequest struct {
+	ID    int64       `json:"id" binding:"required"`
+	Items []PoolItemIn `json:"items" binding:"required,min=1"`
+}
+
 // List 处理 GET /supplier/products/list。
 //
 // @Summary      我的盲盒列表
@@ -214,6 +220,91 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, created)
+}
+
+// Detail 处理 GET /supplier/products/detail。
+//
+// @Summary      盲盒详情（含卡池条目）
+// @Description  编辑页预填用；sold_out/settled 批次也可只读查看。ownership 校验。
+// @Tags         supplier
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  query  int  true  "盲盒 ID"
+// @Success      200  {object}  map[string]any  "box/items"
+// @Failure      400  {object}  map[string]string  "product.invalid_input"
+// @Failure      401  {object}  map[string]string  "product.unauthorized"
+// @Failure      403  {object}  map[string]string  "product.forbidden"
+// @Failure      404  {object}  map[string]string  "product.not_found"
+// @Router       /supplier/products/detail [get]
+func (h *ProductHandler) Detail(c *gin.Context) {
+	supplierID, ok := requireSupplierID(c, "product")
+	if !ok {
+		return
+	}
+	boxID, err := strconv.ParseInt(c.Query("id"), 10, 64)
+	if err != nil || boxID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "product.invalid_input",
+			"message": "invalid box id",
+		})
+		return
+	}
+	box, items, err := h.svc.Detail(c, supplierID, boxID)
+	if err != nil {
+		status, code := mapProductErr(err)
+		c.JSON(status, gin.H{"code": code, "message": "get product detail failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"box": box, "items": items})
+}
+
+// UpdatePool 处理 POST /supplier/products/update-pool。
+//
+// @Summary      重写卡池条目（补库存 / 未开卖调概率）
+// @Description  仅 selling 且零 drawn 订单的批次允许整池重写；weight 加和必须 = 10000。
+// @Tags         supplier
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        req  body  supplier.UpdatePoolRequest  true  "盲盒 ID + 卡池条目"
+// @Success      200  {object}  map[string]string  "edit.ok"
+// @Failure      400  {object}  map[string]string  "product.invalid_input"
+// @Failure      401  {object}  map[string]string  "product.unauthorized"
+// @Failure      403  {object}  map[string]string  "product.forbidden"
+// @Failure      404  {object}  map[string]string  "product.not_found"
+// @Failure      409  {object}  map[string]string  "product.lifecycle_forbidden / product.pool_locked"
+// @Failure      422  {object}  map[string]string  "product.invalid_weight_sum / product.empty_pool"
+// @Router       /supplier/products/update-pool [post]
+func (h *ProductHandler) UpdatePool(c *gin.Context) {
+	supplierID, ok := requireSupplierID(c, "product")
+	if !ok {
+		return
+	}
+
+	var req UpdatePoolRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "product.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	items := make([]mall.MallCardPoolItem, 0, len(req.Items))
+	for _, it := range req.Items {
+		items = append(items, mall.MallCardPoolItem{
+			CardID: it.CardID,
+			Rarity: mall.MallCardRarity(it.Rarity),
+			Weight: it.Weight,
+			Stock:  it.Stock,
+		})
+	}
+
+	if err := h.svc.UpdatePool(c, supplierID, req.ID, items); err != nil {
+		status, code := mapProductErr(err)
+		c.JSON(status, gin.H{"code": code, "message": "update pool failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "edit.ok", "message": "ok"})
 }
 
 // Edit 处理 POST /supplier/products/edit（不修改 supplier_id / status / is_featured）。
@@ -377,6 +468,9 @@ func mapProductErr(err error) (int, string) {
 	case errors.Is(err, supplierSvc.ErrLifecycleForbidden):
 		// 售罄/已结算批次不可再上架（卖完的批次不可逆进入结算）。
 		return http.StatusConflict, "product.lifecycle_forbidden"
+	case errors.Is(err, supplierSvc.ErrPoolLocked):
+		// 已开卖锁池：改池等于改概率，保护概率公示可信度。
+		return http.StatusConflict, "product.pool_locked"
 	default:
 		return http.StatusInternalServerError, "product.internal"
 	}

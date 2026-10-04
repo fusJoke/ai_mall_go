@@ -25,8 +25,10 @@ var expectedSupplierRoutes = []struct {
 	{http.MethodPost, "/supplier/logout"},
 
 	{http.MethodGet, "/supplier/products/list"},
+	{http.MethodGet, "/supplier/products/detail"},
 	{http.MethodPost, "/supplier/products/create"},
 	{http.MethodPost, "/supplier/products/edit"},
+	{http.MethodPost, "/supplier/products/update-pool"},
 	{http.MethodPost, "/supplier/products/toggle-onsale"},
 	{http.MethodPost, "/supplier/products/duplicate"},
 

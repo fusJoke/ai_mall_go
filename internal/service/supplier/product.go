@@ -51,6 +51,12 @@ var (
 	// 不可逆进入结算，settled 是归档终态；off_sale 只适用于 selling。
 	// 对 sold_out/settled 商品 toggle-onsale 会把已归档批次重新推向 C 端曝光。
 	ErrLifecycleForbidden = errors.New("supplier.product: blindbox lifecycle does not allow this operation")
+
+	// ErrPoolLocked 卡池已锁定（该批次已有 drawn 订单，不可再改池）。
+	//
+	// 概率公示可信度：开卖后 weight/stock 结构对用户承诺生效，改池等于改概率。
+	// 补库存只能发生在「selling 且零订单」窗口（复制批次 → 重填 → 上架）。
+	ErrPoolLocked = errors.New("supplier.product: card pool is locked after first sale")
 )
 
 // 业务常量。
@@ -122,6 +128,20 @@ type ProductService interface {
 	// ownership 自检同 Update；事务内复制（box → pool → items，与 Create 同序），
 	// 返回新 blindBoxID。
 	Duplicate(c *gin.Context, supplierID, sourceBoxID int64) (int64, error)
+
+	// Detail 拉盲盒 + 卡池 items（编辑页预填用；sold_out/settled 批次也可只读查看）。
+	// ownership 自检同 Update；无卡池（理论不可能）→ 空 items。
+	Detail(c *gin.Context, supplierID, blindBoxID int64) (*mall.MallBlindBox, []mall.MallCardPoolItem, error)
+
+	// UpdatePool 整池重写卡池条目（复制批次补库存 / 未开卖调概率）。
+	//
+	// 业务规则：
+	//  - ownership 自检同 Update（ErrBlindBoxNotFound / ErrBlindBoxForbidden）；
+	//  - lifecycle 必须 selling（sold_out/settled → ErrLifecycleForbidden）；
+	//  - 该 box 已有 drawn 订单 → ErrPoolLocked：开卖后锁池，保护概率公示可信度；
+	//  - items 非空（ErrEmptyPool）+ weight 加和 == 10000（ErrInvalidWeightSum）；
+	//  - 事务内软删旧 items → 批量插入新 items；成功后失效 C 端详情缓存。
+	UpdatePool(c *gin.Context, supplierID, blindBoxID int64, items []mall.MallCardPoolItem) error
 }
 
 // ProductPatch 是商品编辑的「只改传入字段」入参：nil = 该字段不改。
@@ -490,6 +510,113 @@ func nextBatchName(name string) string {
 	}
 	// 只替换数字捕获组，「第 / 期」字样保留。
 	return name[:loc[2]] + strconv.Itoa(n+1) + name[loc[3]:]
+}
+
+// Detail 实现见 ProductService 注释。
+func (s *baseProductService) Detail(c *gin.Context, supplierID, blindBoxID int64) (*mall.MallBlindBox, []mall.MallCardPoolItem, error) {
+	if supplierID <= 0 {
+		return nil, nil, ErrBlindBoxForbidden
+	}
+	if blindBoxID <= 0 {
+		return nil, nil, ErrBlindBoxNotFound
+	}
+	box, err := s.bb.GetByID(c, blindBoxID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrBlindBoxNotFound
+		}
+		return nil, nil, err
+	}
+	if box == nil || box.SupplierID != supplierID {
+		return nil, nil, ErrBlindBoxForbidden
+	}
+
+	items := make([]mall.MallCardPoolItem, 0)
+	pool, err := s.cp.GetPoolByBlindBoxID(c, blindBoxID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return box, items, nil // 无池兜底（正常数据 1:1 必有池）
+		}
+		return nil, nil, err
+	}
+	items, err = s.cp.ListItemsByPoolID(c, pool.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return box, items, nil
+}
+
+// UpdatePool 实现见 ProductService 注释。
+func (s *baseProductService) UpdatePool(c *gin.Context, supplierID, blindBoxID int64, items []mall.MallCardPoolItem) error {
+	if supplierID <= 0 {
+		return ErrBlindBoxForbidden
+	}
+	if blindBoxID <= 0 {
+		return ErrBlindBoxNotFound
+	}
+	if len(items) == 0 {
+		return ErrEmptyPool
+	}
+	// D2 校验：weight 加和 == 10000（与 Create 同规则）。
+	var totalWeight int64
+	for _, it := range items {
+		totalWeight += int64(it.Weight)
+	}
+	if totalWeight != weightTotal {
+		return ErrInvalidWeightSum
+	}
+
+	// Ownership 自检（与 Update 同模式）。
+	box, err := s.bb.GetByID(c, blindBoxID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrBlindBoxNotFound
+		}
+		return err
+	}
+	if box == nil {
+		return ErrBlindBoxNotFound
+	}
+	if box.SupplierID != supplierID {
+		return ErrBlindBoxForbidden
+	}
+	// 生命周期守卫：只有 selling 批次可改池（sold_out/settled 已固化概率快照）。
+	if box.Lifecycle != mall.LifecycleSelling {
+		return ErrLifecycleForbidden
+	}
+	// 已开卖锁池：存在任何 drawn 订单即拒绝（保护概率公示可信度）。
+	counts, err := s.do.CountDrawnByBoxIDs(c, []int64{blindBoxID})
+	if err != nil {
+		return err
+	}
+	if counts[blindBoxID] > 0 {
+		return ErrPoolLocked
+	}
+
+	err = s.txr.Run(c, func(txCtx *gin.Context) error {
+		pool, err := s.cp.GetPoolByBlindBoxID(txCtx, blindBoxID)
+		if err != nil {
+			return err
+		}
+		// 整池重写：软删旧条目 → 批量插入新条目（PoolID 重指、ID 清零防误带）。
+		if err := s.cp.DeleteItemsByPoolID(txCtx, pool.ID); err != nil {
+			return err
+		}
+		for i := range items {
+			items[i].PoolID = pool.ID
+			items[i].ID = 0
+		}
+		return s.cp.CreateItems(txCtx, items)
+	})
+	if err != nil {
+		return err
+	}
+
+	// 失效 C 端详情缓存（best-effort；失败不阻塞主流程）。
+	if s.cache != nil {
+		_ = userSvc.InvalidateDetail(c.Request.Context(), s.cache, s.hotspot, blindBoxID)
+	}
+	return nil
 }
 
 // 编译期断言：baseProductService 必须实现 ProductService。

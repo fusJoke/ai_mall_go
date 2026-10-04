@@ -3,13 +3,15 @@
 // 通过 init() 自注册到 internal/router/registry；router.Setup 调用时由
 // Apply 懒创建 /supplier 对应的 r.Group 并挂载到引擎。
 //
-// 路由清单（20 条）：
+// 路由清单（22 条）：
 //
 //	POST /supplier/login                    公开     供应商登录
 //	POST /supplier/logout                   公开     供应商登出（幂等）
 //	GET  /supplier/products/list            登录态   我的盲盒列表
+//	GET  /supplier/products/detail          登录态   盲盒详情（含卡池，编辑预填）
 //	POST /supplier/products/create          登录态   创建盲盒 + 卡池（事务）
 //	POST /supplier/products/edit            登录态   编辑盲盒（失效详情缓存）
+//	POST /supplier/products/update-pool     登录态   重写卡池（selling+零订单守卫）
 //	POST /supplier/products/toggle-onsale   登录态   上下架
 //	POST /supplier/products/duplicate       登录态   复制盲盒（再来一批）
 //	GET  /supplier/bills/list               登录态   我的批次账单列表
@@ -144,8 +146,10 @@ func registerSupplierRoutes() {
 
 	// --- 商品管理（登录态） ---
 	registry.Register("/supplier", http.MethodGet, "/products/list", wrap(func(c *gin.Context) { productH.List(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodGet, "/products/detail", wrap(func(c *gin.Context) { productH.Detail(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/create", wrap(func(c *gin.Context) { productH.Create(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/edit", wrap(func(c *gin.Context) { productH.Edit(c) }), middleware.SupplierAuth())
+	registry.Register("/supplier", http.MethodPost, "/products/update-pool", wrap(func(c *gin.Context) { productH.UpdatePool(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/toggle-onsale", wrap(func(c *gin.Context) { productH.ToggleOnSale(c) }), middleware.SupplierAuth())
 	registry.Register("/supplier", http.MethodPost, "/products/duplicate", wrap(func(c *gin.Context) { productH.Duplicate(c) }), middleware.SupplierAuth())
 

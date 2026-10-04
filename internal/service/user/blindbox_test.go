@@ -157,6 +157,9 @@ func (m *mockCardPoolRepo) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []i
 	}
 	return pools, nil
 }
+func (m *mockCardPoolRepo) DeleteItemsByPoolID(c *gin.Context, poolID int64) error {
+	return nil
+}
 func (m *mockCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
 	m.listItemsCalls++
 	m.lastListItemsPoolID = poolID

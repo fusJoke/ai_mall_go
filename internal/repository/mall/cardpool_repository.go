@@ -51,6 +51,9 @@ type CardPoolRepository interface {
 	// CreateItems 批量插入卡牌条目。空 items 短路返回 nil。
 	CreateItems(c *gin.Context, items []mall.MallCardPoolItem) error
 
+	// DeleteItemsByPoolID 软删某卡池全部条目（UpdatePool 整池重写用，事务内）。
+	DeleteItemsByPoolID(c *gin.Context, poolID int64) error
+
 	// DecrementStock 条件扣减 stock（抽卡事务 D3 步骤 4 关键）：
 	//   `UPDATE mall_card_pool_items SET stock = stock - 1 WHERE id = ? AND stock > 0`
 	// id 不存在 / 已软删 / stock=0 均影响 0 行 → 返回 ErrStockEmpty。
@@ -109,6 +112,13 @@ func (r *gormCardPoolRepository) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxI
 		return nil, err
 	}
 	return pools, nil
+}
+
+// DeleteItemsByPoolID 软删某卡池全部条目（gorm 软删 → UPDATE deleted_at）。
+func (r *gormCardPoolRepository) DeleteItemsByPoolID(c *gin.Context, poolID int64) error {
+	return repository.DB(c).
+		Where("pool_id = ?", poolID).
+		Delete(&mall.MallCardPoolItem{}).Error
 }
 
 // ListItemsByPoolID 拉牌池所有 items。

@@ -23,6 +23,8 @@ type mockProductService struct {
 	toggleFunc    func(c *gin.Context, supplierID, blindBoxID int64, onSale bool) error
 	duplicateFunc func(c *gin.Context, supplierID, sourceBoxID int64) (int64, error)
 	poolStatsFunc func(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]supplierSvc.PoolStat, error)
+	detailFunc    func(c *gin.Context, supplierID, blindBoxID int64) (*mall.MallBlindBox, []mall.MallCardPoolItem, error)
+	updatePoolFunc func(c *gin.Context, supplierID, blindBoxID int64, items []mall.MallCardPoolItem) error
 
 	lastSupplierID  int64
 	lastBlindBox    *mall.MallBlindBox
@@ -51,6 +53,24 @@ func (m *mockProductService) PoolStats(c *gin.Context, supplierID int64, boxIDs 
 		return m.poolStatsFunc(c, supplierID, boxIDs)
 	}
 	return map[int64]supplierSvc.PoolStat{}, nil
+}
+
+func (m *mockProductService) Detail(c *gin.Context, supplierID, blindBoxID int64) (*mall.MallBlindBox, []mall.MallCardPoolItem, error) {
+	m.lastSupplierID = supplierID
+	if m.detailFunc != nil {
+		return m.detailFunc(c, supplierID, blindBoxID)
+	}
+	return &mall.MallBlindBox{ID: blindBoxID, SupplierID: supplierID}, []mall.MallCardPoolItem{}, nil
+}
+
+func (m *mockProductService) UpdatePool(c *gin.Context, supplierID, blindBoxID int64, items []mall.MallCardPoolItem) error {
+	m.lastSupplierID = supplierID
+	m.lastUpdateID = blindBoxID
+	m.lastItems = items
+	if m.updatePoolFunc != nil {
+		return m.updatePoolFunc(c, supplierID, blindBoxID, items)
+	}
+	return nil
 }
 
 func (m *mockProductService) Create(c *gin.Context, supplierID int64, b *mall.MallBlindBox, items []mall.MallCardPoolItem) (*mall.MallBlindBox, error) {
