@@ -89,13 +89,45 @@ type DuplicateRequest struct {
 // @Failure      401  {object}  map[string]string  "product.unauthorized"
 // @Failure      500  {object}  map[string]string  "product.internal"
 // @Router       /supplier/products/list [get]
+// validBlindBoxLifecycle 判定 query lifecycle 是否为合法商品生命周期。
+func validBlindBoxLifecycle(s string) bool {
+	switch mall.MallBlindBoxLifecycle(s) {
+	case mall.LifecycleSelling, mall.LifecycleSoldOut, mall.LifecycleSettled:
+		return true
+	}
+	return false
+}
+
+// List 处理 GET /supplier/products/list。
+//
+// @Summary      我的盲盒列表
+// @Description  当前供应商的盲盒分页列表；lifecycle 空 = 全部（商品即批次 v2 状态筛选）。
+// @Tags         supplier
+// @Produce      json
+// @Security     BearerAuth
+// @Param        lifecycle  query  string  false  "生命周期(selling/sold_out/settled)，空=全部"
+// @Param        page       query  int     false  "页码"
+// @Param        page_size  query  int     false  "每页条数"
+// @Success      200  {object}  map[string]any  "items/total/page/page_size/stats"
+// @Failure      400  {object}  map[string]string  "product.invalid_input"
+// @Failure      401  {object}  map[string]string  "product.unauthorized"
+// @Failure      500  {object}  map[string]string  "product.internal"
+// @Router       /supplier/products/list [get]
 func (h *ProductHandler) List(c *gin.Context) {
 	supplierID, ok := requireSupplierID(c, "product")
 	if !ok {
 		return
 	}
+	lifecycle := mall.MallBlindBoxLifecycle(c.Query("lifecycle"))
+	if lifecycle != "" && !validBlindBoxLifecycle(string(lifecycle)) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "product.invalid_input",
+			"message": "invalid lifecycle",
+		})
+		return
+	}
 	opts := parseSupplierListOptions(c)
-	items, total, err := h.svc.List(c, supplierID, opts)
+	items, total, err := h.svc.List(c, supplierID, lifecycle, opts)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "product.internal",
@@ -103,11 +135,26 @@ func (h *ProductHandler) List(c *gin.Context) {
 		})
 		return
 	}
+
+	// 销售进度（任务 5.3）：当页 boxIDs → PoolStats。辅助数据，聚合失败
+	// 不阻塞主列表（前端进度条降级为 0/0）。
+	stats := make(map[int64]supplierSvc.PoolStat)
+	boxIDs := make([]int64, 0, len(items))
+	for _, it := range items {
+		boxIDs = append(boxIDs, it.ID)
+	}
+	if len(boxIDs) > 0 {
+		if got, statErr := h.svc.PoolStats(c, supplierID, boxIDs); statErr == nil {
+			stats = got
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"items":     items,
 		"total":     total,
 		"page":      opts.Page,
 		"page_size": opts.PageSize,
+		"stats":     stats,
 	})
 }
 

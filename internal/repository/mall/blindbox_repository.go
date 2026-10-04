@@ -23,7 +23,8 @@ type BlindBoxRepository interface {
 	GetByID(c *gin.Context, id int64) (*mall.MallBlindBox, error)
 
 	// ListBySupplier 拉某供应商的全部盲盒（管理页 / 供应商后台）。
-	ListBySupplier(c *gin.Context, supplierID int64, opts repository.ListOptions) (items []mall.MallBlindBox, total int64, err error)
+	// lifecycle 空 = 全部生命周期；非空 = 仅该生命周期（前端状态筛选 tab）。
+	ListBySupplier(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) (items []mall.MallBlindBox, total int64, err error)
 
 	// ListFeaturedOnSale 拉「推荐 + 启用 + 在售」盲盒（前端首页推荐位）。
 	ListFeaturedOnSale(c *gin.Context, opts repository.ListOptions) (items []mall.MallBlindBox, total int64, err error)
@@ -66,9 +67,12 @@ func (r *gormBlindBoxRepository) GetByID(c *gin.Context, id int64) (*mall.MallBl
 	return &b, nil
 }
 
-// ListBySupplier 拉某供应商的全部盲盒。
-func (r *gormBlindBoxRepository) ListBySupplier(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+// ListBySupplier 拉某供应商的盲盒（可按 lifecycle 筛选；空 = 全部）。
+func (r *gormBlindBoxRepository) ListBySupplier(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	db := repository.DB(c).Model(&mall.MallBlindBox{}).Where("supplier_id = ?", supplierID)
+	if lifecycle != "" {
+		db = db.Where("lifecycle = ?", lifecycle)
+	}
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {

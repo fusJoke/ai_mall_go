@@ -80,10 +80,11 @@ func ensureDeps() {
 
 		// 商品管理（Update / ToggleOnSale 失效 C 端详情缓存）。
 		productSvc := supplierSvc.NewProductService(supplierSvc.ProductServiceDeps{
-			BlindBoxRepo: mallRepo.NewBlindBoxRepository(),
-			CardPoolRepo: mallRepo.NewCardPoolRepository(),
-			Cache:        cache.Get(),
-			Hotspot:      hotspotInfra.Get(), // D21：写路径同步失效热点详情
+			BlindBoxRepo:  mallRepo.NewBlindBoxRepository(),
+			CardPoolRepo:  mallRepo.NewCardPoolRepository(),
+			DrawOrderRepo: mallRepo.NewDrawOrderRepository(), // PoolStats 销量口径（任务 5.3）
+			Cache:         cache.Get(),
+			Hotspot:       hotspotInfra.Get(), // D21：写路径同步失效热点详情
 		})
 		productH = supplierHandler.NewProductHandler(productSvc)
 

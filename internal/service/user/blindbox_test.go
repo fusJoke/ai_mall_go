@@ -47,7 +47,7 @@ type mockBlindBoxRepo struct {
 	listFeaturedOnSaleFunc            func(c *gin.Context, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
 	listActiveOnSaleBySupplierIDsFunc func(c *gin.Context, ids []int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
 	listByIDsFunc                     func(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error)
-	listBySupplierFunc                func(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
+	listBySupplierFunc                func(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
 	toggleStatusFunc                  func(c *gin.Context, id int64, status mall.MallBlindBoxStatus) error
 	toggleOnSaleFunc                  func(c *gin.Context, id int64, onSale bool) error
 	toggleFeaturedFunc                func(c *gin.Context, id int64, featured bool) error
@@ -90,9 +90,9 @@ func (m *mockBlindBoxRepo) ListByIDs(c *gin.Context, ids []int64) ([]mall.MallBl
 	}
 	return nil, nil
 }
-func (m *mockBlindBoxRepo) ListBySupplier(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *mockBlindBoxRepo) ListBySupplier(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	if m.listBySupplierFunc != nil {
-		return m.listBySupplierFunc(c, supplierID, opts)
+		return m.listBySupplierFunc(c, supplierID, lifecycle, opts)
 	}
 	return nil, 0, nil
 }
@@ -141,6 +141,21 @@ func (m *mockCardPoolRepo) GetPoolByBlindBoxID(c *gin.Context, blindBoxID int64)
 		return m.getPoolByBlindBoxIDFunc(c, blindBoxID)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+func (m *mockCardPoolRepo) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []int64) ([]mall.MallCardPool, error) {
+	if len(blindBoxIDs) == 0 {
+		return nil, nil
+	}
+	// fallback：逐个走 GetPoolByBlindBoxID 单查（user service 域不用 PoolStats，
+	// 这里只为满足接口；返回找到了的池子）。
+	pools := make([]mall.MallCardPool, 0, len(blindBoxIDs))
+	for _, id := range blindBoxIDs {
+		p, err := m.GetPoolByBlindBoxID(c, id)
+		if err == nil && p != nil {
+			pools = append(pools, *p)
+		}
+	}
+	return pools, nil
 }
 func (m *mockCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
 	m.listItemsCalls++

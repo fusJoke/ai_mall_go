@@ -52,6 +52,10 @@ type DrawOrderRepository interface {
 	// ListBoxDrawnOrders 拉某商品全部「drawn 且未被批次账单结算」订单
 	// （GenerateForBox 聚合用，openspec: add-batch-settlement）。
 	ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error)
+
+	// CountDrawnByBoxIDs 按 box id 集合批量统计各自 drawn 订单数（销量口径，
+	// 供应商商品列表 PoolStats 用）。返回 map 缺 key = 0 单。空集合短路。
+	CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error)
 }
 
 // gormDrawOrderRepository 是 DrawOrderRepository 的 *gorm.DB 实现。
@@ -167,6 +171,32 @@ func (r *gormDrawOrderRepository) ListBoxDrawnOrders(c *gin.Context, boxID int64
 		Order("id ASC").
 		Find(&rows).Error
 	return rows, err
+}
+
+// CountDrawnByBoxIDs 按 box id 集合批量统计 drawn 订单数。
+//
+// 单表 GROUP BY（无 join）；map 缺 key = 该 box 无 drawn 订单（0 单）。
+func (r *gormDrawOrderRepository) CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+	out := make(map[int64]int64)
+	if len(boxIDs) == 0 {
+		return out, nil
+	}
+	type countRow struct {
+		BlindBoxID int64
+		Cnt        int64
+	}
+	rows := make([]countRow, 0)
+	if err := repository.DB(c).Model(&mall.MallDrawOrder{}).
+		Select("blind_box_id, COUNT(*) AS cnt").
+		Where("blind_box_id IN ? AND status = ?", boxIDs, mall.OrderStatusDrawn).
+		Group("blind_box_id").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.BlindBoxID] = row.Cnt
+	}
+	return out, nil
 }
 
 // 编译期断言。

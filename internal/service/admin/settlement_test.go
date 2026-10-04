@@ -204,6 +204,11 @@ func (m *adminSettlementOrderRepo) List(c *gin.Context, opts repository.ListOpti
 func (m *adminSettlementOrderRepo) Update(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *adminSettlementOrderRepo) Delete(c *gin.Context, id int64) error              { return nil }
 
+// CountDrawnByBoxIDs PoolStats 用批量销量（admin 结算域不使用，no-op stub）。
+func (m *adminSettlementOrderRepo) CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
+
 var _ mallRepo.DrawOrderRepository = (*adminSettlementOrderRepo)(nil)
 
 // =============================================================================

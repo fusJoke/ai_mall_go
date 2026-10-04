@@ -223,3 +223,41 @@ func TestCardPoolRepository_SubtotalStockByPoolID(t *testing.T) {
 		t.Errorf("mock expectations: %v", err)
 	}
 }
+// TestCardPoolRepository_GetPoolsByBlindBoxIDs 验证按 boxIDs 批量查 1:1 卡池（PoolStats 用）。
+func TestCardPoolRepository_GetPoolsByBlindBoxIDs(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	rows := sqlmock.NewRows([]string{"id", "blind_box_id"}).
+		AddRow(int64(11), int64(1)).
+		AddRow(int64(12), int64(2))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(rows)
+
+	pools, err := NewCardPoolRepository().GetPoolsByBlindBoxIDs(c, []int64{1, 2})
+	if err != nil {
+		t.Fatalf("GetPoolsByBlindBoxIDs: %v", err)
+	}
+	if len(pools) != 2 || pools[0].ID != 11 || pools[1].BlindBoxID != 2 {
+		t.Errorf("pools = %+v", pools)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestCardPoolRepository_GetPoolsByBlindBoxIDs_Empty 验证空集合短路（零 SQL）。
+func TestCardPoolRepository_GetPoolsByBlindBoxIDs_Empty(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	pools, err := NewCardPoolRepository().GetPoolsByBlindBoxIDs(c, nil)
+	if err != nil {
+		t.Fatalf("GetPoolsByBlindBoxIDs: %v", err)
+	}
+	if pools != nil {
+		t.Errorf("pools = %v, want nil", pools)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+	}
+}

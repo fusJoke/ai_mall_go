@@ -30,7 +30,7 @@ func (s *stubBlindBoxRepo) GetByID(c *gin.Context, id int64) (*mall.MallBlindBox
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (s *stubBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (s *stubBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	return nil, 0, nil
 }
 func (s *stubBlindBoxRepo) ListFeaturedOnSale(c *gin.Context, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {

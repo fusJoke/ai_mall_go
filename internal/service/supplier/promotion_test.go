@@ -130,7 +130,7 @@ func (m *promoBlindBoxRepo) ListFeaturedOnSale(c *gin.Context, opts repository.L
 func (m *promoBlindBoxRepo) ListByIDs(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error) {
 	return nil, nil
 }
-func (m *promoBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *promoBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	return nil, 0, nil
 }
 func (m *promoBlindBoxRepo) ListActiveOnSaleBySupplierIDs(c *gin.Context, ids []int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {

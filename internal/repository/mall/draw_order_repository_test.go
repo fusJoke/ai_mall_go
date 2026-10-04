@@ -189,3 +189,41 @@ func TestDrawOrderRepository_ListSettledOrdersBySupplierInRange(t *testing.T) {
 		t.Errorf("mock expectations: %v", err)
 	}
 }
+// TestDrawOrderRepository_CountDrawnByBoxIDs 验证按 boxIDs 批量统计 drawn 订单数（PoolStats 用）。
+func TestDrawOrderRepository_CountDrawnByBoxIDs(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	rows := sqlmock.NewRows([]string{"blind_box_id", "cnt"}).
+		AddRow(int64(1), int64(97)).
+		AddRow(int64(2), int64(5))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "drawn").
+		WillReturnRows(rows)
+
+	got, err := NewDrawOrderRepository().CountDrawnByBoxIDs(c, []int64{1, 2})
+	if err != nil {
+		t.Fatalf("CountDrawnByBoxIDs: %v", err)
+	}
+	if got[1] != 97 || got[2] != 5 {
+		t.Errorf("counts = %v, want {1:97 2:5}", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestDrawOrderRepository_CountDrawnByBoxIDs_Empty 验证空集合短路（零 SQL）。
+func TestDrawOrderRepository_CountDrawnByBoxIDs_Empty(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	got, err := NewDrawOrderRepository().CountDrawnByBoxIDs(c, nil)
+	if err != nil {
+		t.Fatalf("CountDrawnByBoxIDs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("counts = %v, want empty", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+	}
+}

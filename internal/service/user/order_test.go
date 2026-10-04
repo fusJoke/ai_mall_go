@@ -77,6 +77,11 @@ func (m *orderDrawOrderRepo) ListSettledOrdersBySupplierInRange(c *gin.Context, 
 func (m *orderDrawOrderRepo) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
 	return nil, nil
 }
+
+// CountDrawnByBoxIDs PoolStats 用（order 域不使用，no-op stub 满足接口）。
+func (m *orderDrawOrderRepo) CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
 func (m *orderDrawOrderRepo) Create(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *orderDrawOrderRepo) List(c *gin.Context, opts repository.ListOptions) ([]mall.MallDrawOrder, int64, error) {
 	return nil, 0, nil

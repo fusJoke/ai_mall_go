@@ -52,7 +52,8 @@ type productBlindBoxRepo struct {
 	createFunc         func(c *gin.Context, e *mall.MallBlindBox) error
 	updateFunc         func(c *gin.Context, e *mall.MallBlindBox) error
 	getByIDFunc        func(c *gin.Context, id int64) (*mall.MallBlindBox, error)
-	listBySupplierFunc func(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
+	listBySupplierFunc func(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
+	listByIDsFunc      func(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error)
 	toggleOnSaleFunc   func(c *gin.Context, id int64, onSale bool) error
 
 	createCalls, updateCalls, getByIDCalls, toggleOnSaleCalls int
@@ -87,9 +88,9 @@ func (m *productBlindBoxRepo) GetByID(c *gin.Context, id int64) (*mall.MallBlind
 	}
 	return nil, gorm.ErrRecordNotFound
 }
-func (m *productBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *productBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	if m.listBySupplierFunc != nil {
-		return m.listBySupplierFunc(c, sid, opts)
+		return m.listBySupplierFunc(c, sid, lifecycle, opts)
 	}
 	return nil, 0, nil
 }
@@ -114,6 +115,9 @@ func (m *productBlindBoxRepo) ListActiveOnSaleBySupplierIDs(c *gin.Context, ids 
 	return nil, 0, nil
 }
 func (m *productBlindBoxRepo) ListByIDs(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error) {
+	if m.listByIDsFunc != nil {
+		return m.listByIDsFunc(c, ids)
+	}
 	return nil, nil
 }
 func (m *productBlindBoxRepo) ToggleStatus(c *gin.Context, id int64, s mall.MallBlindBoxStatus) error {
@@ -128,7 +132,9 @@ type productCardPoolRepo struct {
 	createPoolFunc        func(f *m_unused_anchor) error // 占位避免编译器报 unused-arg
 	createItemsFunc       func(c *gin.Context, items []mall.MallCardPoolItem) error
 	getPoolFunc           func(c *gin.Context, bbID int64) (*mall.MallCardPool, error)
+	getPoolsFunc          func(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error)
 	listItemsByPoolIDFunc func(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error)
+	listItemsByPoolIDsFunc func(c *gin.Context, poolIDs []int64) ([]mall.MallCardPoolItem, error)
 
 	createPoolCalls, createItemsCalls int
 	lastPoolID                        int64
@@ -164,6 +170,14 @@ func (m *productCardPoolRepo) GetPoolByBlindBoxID(c *gin.Context, bbID int64) (*
 	return nil, gorm.ErrRecordNotFound
 }
 
+// GetPoolsByBlindBoxIDs PoolStats 用批量查（task 5.3）。
+func (m *productCardPoolRepo) GetPoolsByBlindBoxIDs(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error) {
+	if m.getPoolsFunc != nil {
+		return m.getPoolsFunc(c, bbIDs)
+	}
+	return nil, nil
+}
+
 // 其他方法 no-op。
 func (m *productCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
 	if m.listItemsByPoolIDFunc != nil {
@@ -175,6 +189,9 @@ func (m *productCardPoolRepo) ListItemsForUpdateByPoolID(c *gin.Context, poolID 
 	return nil, nil
 }
 func (m *productCardPoolRepo) ListItemsByPoolIDs(c *gin.Context, poolIDs []int64) ([]mall.MallCardPoolItem, error) {
+	if m.listItemsByPoolIDsFunc != nil {
+		return m.listItemsByPoolIDsFunc(c, poolIDs)
+	}
 	return nil, nil
 }
 func (m *productCardPoolRepo) CreateItem(c *gin.Context, item *mall.MallCardPoolItem) error {
@@ -222,6 +239,24 @@ func (m *mockCache) Decr(ctx context.Context, key string) (int64, error) {
 	return 0, nil
 }
 
+// productDrawOrderRepo 嵌入 nil 接口 + 按需 override（PoolStats 用）。
+type productDrawOrderRepo struct {
+	mallRepo.DrawOrderRepository
+
+	countDrawnFunc  func(c *gin.Context, boxIDs []int64) (map[int64]int64, error)
+	countDrawnCalls int
+	lastBoxIDs      []int64
+}
+
+func (m *productDrawOrderRepo) CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+	m.countDrawnCalls++
+	m.lastBoxIDs = boxIDs
+	if m.countDrawnFunc != nil {
+		return m.countDrawnFunc(c, boxIDs)
+	}
+	return map[int64]int64{}, nil
+}
+
 var _ cache.Cache = (*mockCache)(nil)
 
 // =============================================================================
@@ -231,6 +266,7 @@ var _ cache.Cache = (*mockCache)(nil)
 type productDeps struct {
 	bb    *productBlindBoxRepo
 	cp    *productCardPoolRepo
+	do    *productDrawOrderRepo
 	cache *mockCache
 	txr   *mockTxRunner
 }
@@ -239,6 +275,7 @@ func defaultProductDeps() productDeps {
 	return productDeps{
 		bb:    &productBlindBoxRepo{},
 		cp:    &productCardPoolRepo{},
+		do:    &productDrawOrderRepo{},
 		cache: &mockCache{},
 		txr:   &mockTxRunner{},
 	}
@@ -246,10 +283,11 @@ func defaultProductDeps() productDeps {
 
 func newProductSvcFromDeps(d productDeps) ProductService {
 	return NewProductService(ProductServiceDeps{
-		BlindBoxRepo: d.bb,
-		CardPoolRepo: d.cp,
-		Cache:        d.cache,
-		TxRunner:     d.txr,
+		BlindBoxRepo:  d.bb,
+		CardPoolRepo:  d.cp,
+		DrawOrderRepo: d.do,
+		Cache:         d.cache,
+		TxRunner:      d.txr,
 	})
 }
 
@@ -260,7 +298,7 @@ func newProductSvcFromDeps(d productDeps) ProductService {
 func TestProductList_InvalidSupplierID(t *testing.T) {
 	d := defaultProductDeps()
 	svc := newProductSvcFromDeps(d)
-	items, total, err := svc.List(newProductCtx(), 0, repository.ListOptions{Page: 1, PageSize: 10})
+	items, total, err := svc.List(newProductCtx(), 0, "", repository.ListOptions{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -271,9 +309,12 @@ func TestProductList_InvalidSupplierID(t *testing.T) {
 
 func TestProductList_DelegatesToRepo(t *testing.T) {
 	d := defaultProductDeps()
-	d.bb.listBySupplierFunc = func(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+	d.bb.listBySupplierFunc = func(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 		if sid != 7 {
 			t.Errorf("supplierID = %d, want 7", sid)
+		}
+		if lifecycle != mall.LifecycleSelling {
+			t.Errorf("lifecycle = %q, want selling", lifecycle)
 		}
 		return []mall.MallBlindBox{
 			{ID: 1, SupplierID: 7, Name: "Box A"},
@@ -281,12 +322,113 @@ func TestProductList_DelegatesToRepo(t *testing.T) {
 		}, 2, nil
 	}
 	svc := newProductSvcFromDeps(d)
-	items, total, err := svc.List(newProductCtx(), 7, repository.ListOptions{Page: 1, PageSize: 10})
+	items, total, err := svc.List(newProductCtx(), 7, mall.LifecycleSelling, repository.ListOptions{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if total != 2 || len(items) != 2 {
 		t.Errorf("got (%d, %d), want (2, 2)", total, len(items))
+	}
+}
+
+// =============================================================================
+// PoolStats（任务 5.3 销售进度）
+// =============================================================================
+
+// TestProductService_PoolStats_Aggregates 验证剩余库存跨 pool 聚合 + 销量归箱。
+func TestProductService_PoolStats_Aggregates(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.listByIDsFunc = func(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error) {
+		if len(ids) != 2 {
+			t.Errorf("ListByIDs ids = %v, want [1 2]", ids)
+		}
+		return []mall.MallBlindBox{{ID: 1, SupplierID: 7}, {ID: 2, SupplierID: 7}}, nil
+	}
+	d.cp.getPoolsFunc = func(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error) {
+		return []mall.MallCardPool{{ID: 11, BlindBoxID: 1}, {ID: 12, BlindBoxID: 2}}, nil
+	}
+	d.cp.listItemsByPoolIDsFunc = func(c *gin.Context, poolIDs []int64) ([]mall.MallCardPoolItem, error) {
+		if len(poolIDs) != 2 {
+			t.Errorf("ListItemsByPoolIDs poolIDs = %v, want [11 12]", poolIDs)
+		}
+		// pool11 两行 (stock 3+4) 验证同 box 聚合；pool12 一行 (stock 0)。
+		return []mall.MallCardPoolItem{
+			{PoolID: 11, Stock: 3},
+			{PoolID: 11, Stock: 4},
+			{PoolID: 12, Stock: 0},
+		}, nil
+	}
+	d.do.countDrawnFunc = func(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+		return map[int64]int64{1: 97, 2: 5}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	out, err := svc.PoolStats(newProductCtx(), 7, []int64{1, 2})
+	if err != nil {
+		t.Fatalf("PoolStats: %v", err)
+	}
+	if got := out[1]; got.Remaining != 7 || got.Sold != 97 {
+		t.Errorf("stats[1] = %+v, want remaining=7 sold=97", got)
+	}
+	if got := out[2]; got.Remaining != 0 || got.Sold != 5 {
+		t.Errorf("stats[2] = %+v, want remaining=0 sold=5", got)
+	}
+	if d.do.countDrawnCalls != 1 {
+		t.Errorf("CountDrawnByBoxIDs calls = %d, want 1", d.do.countDrawnCalls)
+	}
+}
+
+// TestProductService_PoolStats_FiltersForeignBoxes 验证越权 box 被剔除：
+// 非本供应商的 boxID 不进 pool / order 查询（防跨供应商枚举库存）。
+func TestProductService_PoolStats_FiltersForeignBoxes(t *testing.T) {
+	d := defaultProductDeps()
+	d.bb.listByIDsFunc = func(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error) {
+		return []mall.MallBlindBox{
+			{ID: 1, SupplierID: 7},   // 本供应商
+			{ID: 2, SupplierID: 99},  // 越权：别人的批次
+		}, nil
+	}
+	gotPoolIDs := []int64(nil)
+	d.cp.getPoolsFunc = func(c *gin.Context, bbIDs []int64) ([]mall.MallCardPool, error) {
+		if len(bbIDs) != 1 || bbIDs[0] != 1 {
+			t.Errorf("pools query boxIDs = %v, want [1] (越权 box 已剔除)", bbIDs)
+		}
+		gotPoolIDs = bbIDs
+		return []mall.MallCardPool{{ID: 11, BlindBoxID: 1}}, nil
+	}
+	d.cp.listItemsByPoolIDsFunc = func(c *gin.Context, poolIDs []int64) ([]mall.MallCardPoolItem, error) {
+		return []mall.MallCardPoolItem{{PoolID: 11, Stock: 9}}, nil
+	}
+	d.do.countDrawnFunc = func(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+		return map[int64]int64{1: 3}, nil
+	}
+	svc := newProductSvcFromDeps(d)
+
+	out, err := svc.PoolStats(newProductCtx(), 7, []int64{1, 2})
+	if err != nil {
+		t.Fatalf("PoolStats: %v", err)
+	}
+	if _, exists := out[2]; exists {
+		t.Errorf("foreign box 2 must not appear in stats: %v", out)
+	}
+	if got := out[1]; got.Remaining != 9 || got.Sold != 3 {
+		t.Errorf("stats[1] = %+v, want remaining=9 sold=3", got)
+	}
+	if gotPoolIDs == nil {
+		t.Errorf("pools query never ran")
+	}
+}
+
+// TestProductService_PoolStats_EmptyInput 验证空 boxIDs 短路。
+func TestProductService_PoolStats_EmptyInput(t *testing.T) {
+	d := defaultProductDeps()
+	svc := newProductSvcFromDeps(d)
+	out, err := svc.PoolStats(newProductCtx(), 7, nil)
+	if err != nil {
+		t.Fatalf("PoolStats: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("out = %v, want empty", out)
 	}
 }
 

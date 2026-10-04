@@ -34,7 +34,7 @@ func TestBlindBoxRepository_GetByID_Found(t *testing.T) {
 	}
 }
 
-// TestBlindBoxRepository_ListBySupplier 验证分页查（先 Count 再 Find）。
+// TestBlindBoxRepository_ListBySupplier 验证分页查（先 Count 再 Find；lifecycle 空 = 全部）。
 func TestBlindBoxRepository_ListBySupplier(t *testing.T) {
 	c, mock := newMockContext(t)
 
@@ -48,12 +48,37 @@ func TestBlindBoxRepository_ListBySupplier(t *testing.T) {
 		WithArgs(int64(3), sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
-	items, total, err := NewBlindBoxRepository().ListBySupplier(c, 3, repository.ListOptions{Page: 1, PageSize: 20})
+	items, total, err := NewBlindBoxRepository().ListBySupplier(c, 3, "", repository.ListOptions{Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("ListBySupplier: %v", err)
 	}
 	if total != 2 || len(items) != 2 {
 		t.Errorf("total=%d items=%d, want 2/2", total, len(items))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestBlindBoxRepository_ListBySupplier_LifecycleFilter 验证 lifecycle 非空时追加 WHERE。
+func TestBlindBoxRepository_ListBySupplier_LifecycleFilter(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	mock.ExpectQuery(`(?i)SELECT count`).
+		WithArgs(int64(3), mall.LifecycleSoldOut).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	rows := sqlmock.NewRows([]string{"id", "supplier_id"}).
+		AddRow(int64(1), int64(3))
+	mock.ExpectQuery(`(?i)SELECT`).
+		WithArgs(int64(3), mall.LifecycleSoldOut, sqlmock.AnyArg()).
+		WillReturnRows(rows)
+
+	items, total, err := NewBlindBoxRepository().ListBySupplier(c, 3, mall.LifecycleSoldOut, repository.ListOptions{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListBySupplier: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Errorf("total=%d items=%d, want 1/1", total, len(items))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("mock expectations: %v", err)

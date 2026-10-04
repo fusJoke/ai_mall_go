@@ -69,7 +69,17 @@ type txRunner interface {
 // ProductService 是 B 端供应商的盲盒管理接口。
 type ProductService interface {
 	// List 拉当前 supplier 的盲盒（按 id DESC）。
-	List(c *gin.Context, supplierID int64, opts repository.ListOptions) (items []mall.MallBlindBox, total int64, err error)
+	// lifecycle 空 = 全部生命周期；非空 = 仅该生命周期（商品即批次 v2 状态筛选）。
+	List(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) (items []mall.MallBlindBox, total int64, err error)
+
+	// PoolStats 批量取盲盒销售进度（openspec: add-batch-settlement 任务 5.3）。
+	//
+	// 口径：Remaining = Σ pool_items.stock（当前剩余可抽），
+	// Sold = COUNT(draw_orders WHERE status='drawn')（成功售出），
+	// 前端总名额 = Remaining + Sold。
+	// ownership：不属于该 supplier 的 boxID 直接剔除（防越权枚举库存）。
+	// 返回 map 缺 key = 未统计（0/0）；入参 boxIDs 空或全被剔除 → 空 map。
+	PoolStats(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]PoolStat, error)
 
 	// Create 单事务内建盲盒 + 卡池 + 卡池 items。
 	//
@@ -125,19 +135,27 @@ type ProductPatch struct {
 	Description *string
 }
 
+// PoolStat 是单个盲盒的销售进度快照（PoolStats 返回元素）。
+type PoolStat struct {
+	Remaining int64 `json:"remaining"` // 当前剩余可抽数（Σ pool_items.stock）
+	Sold      int64 `json:"sold"`      // 已售出数（drawn 订单计数）
+}
+
 // ProductServiceDeps 注入 ProductService 所需的依赖。
 type ProductServiceDeps struct {
-	BlindBoxRepo mallRepo.BlindBoxRepository
-	CardPoolRepo mallRepo.CardPoolRepository
-	Cache        cache.Cache          // 用于 Update / ToggleOnSale 失效 C 端详情缓存；nil 时跳过
-	Hotspot      hotspot.HotspotCache // D21：写路径同时失效热点详情；nil 时跳过
-	TxRunner     txRunner             // 可选；nil 时走 repository.RunInTx
+	BlindBoxRepo  mallRepo.BlindBoxRepository
+	CardPoolRepo  mallRepo.CardPoolRepository
+	DrawOrderRepo mallRepo.DrawOrderRepository // PoolStats 销量口径；必填（缺失即 panic fail-fast）
+	Cache         cache.Cache                  // 用于 Update / ToggleOnSale 失效 C 端详情缓存；nil 时跳过
+	Hotspot       hotspot.HotspotCache         // D21：写路径同时失效热点详情；nil 时跳过
+	TxRunner      txRunner                     // 可选；nil 时走 repository.RunInTx
 }
 
 // baseProductService 是 ProductService 的默认实现。
 type baseProductService struct {
 	bb      mallRepo.BlindBoxRepository
 	cp      mallRepo.CardPoolRepository
+	do      mallRepo.DrawOrderRepository
 	cache   cache.Cache
 	hotspot hotspot.HotspotCache
 	txr     txRunner
@@ -152,6 +170,7 @@ func NewProductService(d ProductServiceDeps) ProductService {
 	return &baseProductService{
 		bb:      d.BlindBoxRepo,
 		cp:      d.CardPoolRepo,
+		do:      d.DrawOrderRepo,
 		cache:   d.Cache,
 		hotspot: d.Hotspot,
 		txr:     txr,
@@ -166,11 +185,71 @@ func (defaultTxRunner) Run(c *gin.Context, fn func(txCtx *gin.Context) error) er
 }
 
 // List 实现见 ProductService 注释。
-func (s *baseProductService) List(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (s *baseProductService) List(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	if supplierID <= 0 {
 		return []mall.MallBlindBox{}, 0, nil
 	}
-	return s.bb.ListBySupplier(c, supplierID, opts)
+	return s.bb.ListBySupplier(c, supplierID, lifecycle, opts)
+}
+
+// PoolStats 实现见 ProductService 注释。
+func (s *baseProductService) PoolStats(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]PoolStat, error) {
+	out := make(map[int64]PoolStat)
+	if supplierID <= 0 || len(boxIDs) == 0 {
+		return out, nil
+	}
+
+	// ownership：只统计属于该供应商的 box。
+	boxes, err := s.bb.ListByIDs(c, boxIDs)
+	if err != nil {
+		return nil, err
+	}
+	valid := make([]int64, 0, len(boxes))
+	for _, b := range boxes {
+		if b.SupplierID == supplierID {
+			valid = append(valid, b.ID)
+		}
+	}
+	if len(valid) == 0 {
+		return out, nil
+	}
+
+	// 剩余可抽：pools（1:1 box）→ items 按 pool 聚合 → 归到 box。
+	pools, err := s.cp.GetPoolsByBlindBoxIDs(c, valid)
+	if err != nil {
+		return nil, err
+	}
+	poolIDs := make([]int64, 0, len(pools))
+	boxByPool := make(map[int64]int64, len(pools))
+	for _, p := range pools {
+		poolIDs = append(poolIDs, p.ID)
+		boxByPool[p.ID] = p.BlindBoxID
+	}
+	items, err := s.cp.ListItemsByPoolIDs(c, poolIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		boxID, ok := boxByPool[it.PoolID]
+		if !ok {
+			continue
+		}
+		st := out[boxID]
+		st.Remaining += int64(it.Stock)
+		out[boxID] = st
+	}
+
+	// 已售：drawn 订单计数（终态口径）。
+	sold, err := s.do.CountDrawnByBoxIDs(c, valid)
+	if err != nil {
+		return nil, err
+	}
+	for boxID, cnt := range sold {
+		st := out[boxID]
+		st.Sold = cnt
+		out[boxID] = st
+	}
+	return out, nil
 }
 
 // Create 实现见 ProductService 注释。

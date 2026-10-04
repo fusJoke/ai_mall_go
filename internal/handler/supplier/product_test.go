@@ -17,11 +17,12 @@ import (
 
 // mockProductService 实现 supplierSvc.ProductService。
 type mockProductService struct {
-	listFunc      func(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
+	listFunc      func(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error)
 	createFunc    func(c *gin.Context, supplierID int64, b *mall.MallBlindBox, items []mall.MallCardPoolItem) (*mall.MallBlindBox, error)
 	updateFunc    func(c *gin.Context, supplierID, blindBoxID int64, patch supplierSvc.ProductPatch) error
 	toggleFunc    func(c *gin.Context, supplierID, blindBoxID int64, onSale bool) error
 	duplicateFunc func(c *gin.Context, supplierID, sourceBoxID int64) (int64, error)
+	poolStatsFunc func(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]supplierSvc.PoolStat, error)
 
 	lastSupplierID  int64
 	lastBlindBox    *mall.MallBlindBox
@@ -31,13 +32,25 @@ type mockProductService struct {
 	lastUpdateID    int64
 	lastPatch       supplierSvc.ProductPatch
 	lastDuplicateID int64
+	lastLifecycle   mall.MallBlindBoxLifecycle
+	lastStatBoxIDs  []int64
 }
 
-func (m *mockProductService) List(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *mockProductService) List(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+	m.lastSupplierID = supplierID
+	m.lastLifecycle = lifecycle
 	if m.listFunc != nil {
-		return m.listFunc(c, supplierID, opts)
+		return m.listFunc(c, supplierID, lifecycle, opts)
 	}
 	return []mall.MallBlindBox{}, 0, nil
+}
+
+func (m *mockProductService) PoolStats(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]supplierSvc.PoolStat, error) {
+	m.lastStatBoxIDs = boxIDs
+	if m.poolStatsFunc != nil {
+		return m.poolStatsFunc(c, supplierID, boxIDs)
+	}
+	return map[int64]supplierSvc.PoolStat{}, nil
 }
 
 func (m *mockProductService) Create(c *gin.Context, supplierID int64, b *mall.MallBlindBox, items []mall.MallCardPoolItem) (*mall.MallBlindBox, error) {
@@ -247,9 +260,12 @@ func TestProductCreate_ServiceErrors(t *testing.T) {
 
 func TestProductList_HappyPath(t *testing.T) {
 	svc := &mockProductService{
-		listFunc: func(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+		listFunc: func(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 			if supplierID != 10 {
 				t.Errorf("supplierID = %d, want 10", supplierID)
+			}
+			if lifecycle != "" {
+				t.Errorf("lifecycle = %q, want empty (全部)", lifecycle)
 			}
 			return []mall.MallBlindBox{{ID: 1, Name: "A"}}, 1, nil
 		},
@@ -264,6 +280,64 @@ func TestProductList_HappyPath(t *testing.T) {
 	}
 	if resp["total"] != float64(1) {
 		t.Errorf("total = %v", resp["total"])
+	}
+	// stats 键始终存在（空 map 也输出），前端无需判空。
+	if _, ok := resp["stats"]; !ok {
+		t.Errorf("response missing stats key")
+	}
+}
+
+// TestProductList_LifecycleFilter 验证 lifecycle query 透传 + 合法值放行。
+func TestProductList_LifecycleFilter(t *testing.T) {
+	svc := &mockProductService{
+		listFunc: func(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+			if lifecycle != mall.LifecycleSoldOut {
+				t.Errorf("lifecycle = %q, want sold_out", lifecycle)
+			}
+			return []mall.MallBlindBox{{ID: 1, SupplierID: 10, Lifecycle: mall.LifecycleSoldOut}}, 1, nil
+		},
+		poolStatsFunc: func(c *gin.Context, supplierID int64, boxIDs []int64) (map[int64]supplierSvc.PoolStat, error) {
+			if len(boxIDs) != 1 || boxIDs[0] != 1 {
+				t.Errorf("PoolStats boxIDs = %v, want [1]", boxIDs)
+			}
+			return map[int64]supplierSvc.PoolStat{1: {Remaining: 3, Sold: 97}}, nil
+		},
+	}
+	h := NewProductHandler(svc)
+
+	code, resp := doSupplierJSON(t, http.MethodGet, "/supplier/products/list?lifecycle=sold_out", nil, func(r *gin.Engine) {
+		r.GET("/supplier/products/list", withSupplier(10), h.List)
+	})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	stats, ok := resp["stats"].(map[string]any)
+	if !ok {
+		t.Fatalf("stats = %v, want map", resp["stats"])
+	}
+	boxStats, ok := stats["1"].(map[string]any)
+	if !ok {
+		t.Fatalf("stats[1] = %v, want map", stats["1"])
+	}
+	// JSON 数字反序列化为 float64。
+	if boxStats["remaining"] != float64(3) || boxStats["sold"] != float64(97) {
+		t.Errorf("stats[1] = %v, want remaining=3 sold=97", boxStats)
+	}
+}
+
+// TestProductList_InvalidLifecycle_400 验证非法 lifecycle → 400。
+func TestProductList_InvalidLifecycle_400(t *testing.T) {
+	svc := &mockProductService{}
+	h := NewProductHandler(svc)
+
+	code, resp := doSupplierJSON(t, http.MethodGet, "/supplier/products/list?lifecycle=garbage", nil, func(r *gin.Engine) {
+		r.GET("/supplier/products/list", withSupplier(10), h.List)
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+	if resp["code"] != "product.invalid_input" {
+		t.Errorf("code = %v", resp["code"])
 	}
 }
 

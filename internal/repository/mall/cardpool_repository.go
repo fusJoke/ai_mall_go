@@ -22,6 +22,10 @@ type CardPoolRepository interface {
 	// GetPoolByBlindBoxID 走 blind_box_id UK 查 1:1 卡池。
 	GetPoolByBlindBoxID(c *gin.Context, blindBoxID int64) (*mall.MallCardPool, error)
 
+	// GetPoolsByBlindBoxIDs 按 box id 集合批量查 1:1 卡池（PoolStats 用，
+	// openspec: add-batch-settlement）。空集合短路返回 nil。
+	GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []int64) ([]mall.MallCardPool, error)
+
 	// CreatePool 插入新卡池（事务内使用）。entity 为 nil 时返回错误。
 	CreatePool(c *gin.Context, pool *mall.MallCardPool) error
 
@@ -91,6 +95,20 @@ func (r *gormCardPoolRepository) CreatePool(c *gin.Context, pool *mall.MallCardP
 		return errors.New("cardpool: nil pool")
 	}
 	return repository.DB(c).Create(pool).Error
+}
+
+// GetPoolsByBlindBoxIDs 按 box id 集合批量查 1:1 卡池。
+func (r *gormCardPoolRepository) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []int64) ([]mall.MallCardPool, error) {
+	if len(blindBoxIDs) == 0 {
+		return nil, nil
+	}
+	pools := make([]mall.MallCardPool, 0)
+	if err := repository.DB(c).
+		Where("blind_box_id IN ?", blindBoxIDs).
+		Find(&pools).Error; err != nil {
+		return nil, err
+	}
+	return pools, nil
 }
 
 // ListItemsByPoolID 拉牌池所有 items。

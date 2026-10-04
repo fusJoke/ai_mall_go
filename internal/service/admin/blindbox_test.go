@@ -84,7 +84,7 @@ func (m *adminBlindBoxRepo) ToggleFeatured(c *gin.Context, id int64, featured bo
 	}
 	return nil
 }
-func (m *adminBlindBoxRepo) ListBySupplier(c *gin.Context, supplierID int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *adminBlindBoxRepo) ListBySupplier(c *gin.Context, supplierID int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	return nil, 0, nil
 }
 func (m *adminBlindBoxRepo) ListFeaturedOnSale(c *gin.Context, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {

@@ -66,7 +66,7 @@ func (m *drawBlindBoxRepo) GetByID(c *gin.Context, id int64) (*mall.MallBlindBox
 func (m *drawBlindBoxRepo) ListByIDs(c *gin.Context, ids []int64) ([]mall.MallBlindBox, error) {
 	return nil, nil
 }
-func (m *drawBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
+func (m *drawBlindBoxRepo) ListBySupplier(c *gin.Context, sid int64, lifecycle mall.MallBlindBoxLifecycle, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	return nil, 0, nil
 }
 func (m *drawBlindBoxRepo) ListFeaturedOnSale(c *gin.Context, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
@@ -113,6 +113,11 @@ func (m *drawCardPoolRepo) GetPoolByBlindBoxID(c *gin.Context, blindBoxID int64)
 		return m.getPoolByBlindBoxIDFunc(c, blindBoxID)
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+// GetPoolsByBlindBoxIDs PoolStats 用（draw 域不使用，no-op stub 满足接口）。
+func (m *drawCardPoolRepo) GetPoolsByBlindBoxIDs(c *gin.Context, blindBoxIDs []int64) ([]mall.MallCardPool, error) {
+	return nil, nil
 }
 func (m *drawCardPoolRepo) ListItemsByPoolID(c *gin.Context, poolID int64) ([]mall.MallCardPoolItem, error) {
 	m.listItemsCalls++
@@ -377,6 +382,11 @@ func (m *drawOrderRepo) ListSettledOrdersBySupplierInRange(c *gin.Context, sid i
 }
 func (m *drawOrderRepo) ListBoxDrawnOrders(c *gin.Context, boxID int64) ([]mall.MallDrawOrder, error) {
 	return nil, nil
+}
+
+// CountDrawnByBoxIDs PoolStats 用（draw 域不使用，no-op stub 满足接口）。
+func (m *drawOrderRepo) CountDrawnByBoxIDs(c *gin.Context, boxIDs []int64) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
 }
 func (m *drawOrderRepo) Create(c *gin.Context, e *mall.MallDrawOrder) error { return nil }
 func (m *drawOrderRepo) List(c *gin.Context, opts repository.ListOptions) ([]mall.MallDrawOrder, int64, error) {
