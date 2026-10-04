@@ -51,11 +51,20 @@ const (
 
 // ES 查询 DSL（按文档顺序排序）。
 //
-// 索引内容已预过滤（见 spec Requirement "ES sync script"），所以 query 阶段
-// 只 match_all + sort 即可；过滤规则下推到 cmd/es-sync 写入端。
+// 双层防御（v2 商品即批次）：
+//   - 写侧：cmd/es-sync 只收录 status=active AND on_sale AND lifecycle='selling'；
+//   - 读侧：本 DSL 再对 lifecycle 做 term filter —— 即便写侧漏过（增量同步延迟、
+//     旧索引残留），售罄/已结算商品也不会出现在 C 端 feed。
+//     （用户点进去才发现「已售罄」是差体验，读时防线让隐藏准实时生效。）
 var (
 	blindBoxFeedQuery = fmt.Appendf(nil, `{
-		"query": {"match_all": {}},
+		"query": {
+			"bool": {
+				"filter": [
+					{"term": {"lifecycle": "selling"}}
+				]
+			}
+		},
 		"sort": [
 			{"hot_score": "desc"},
 			{"created_at": "desc"}

@@ -1125,8 +1125,8 @@ type fakeBillSvc struct {
 
 	finalizeFunc func(c *gin.Context, boxID int64) error
 
-	finalizeCalls    int
-	lastFinalizeBox  int64
+	finalizeCalls   int
+	lastFinalizeBox int64
 }
 
 func (f *fakeBillSvc) FinalizeSoldOut(c *gin.Context, boxID int64) error {
@@ -1193,3 +1193,61 @@ func TestDraw_BillFinalizeFailure_RollsBack(t *testing.T) {
 		t.Errorf("Draw with failing bill finalize = nil, want err (tx must roll back)")
 	}
 }
+
+// TestDraw_SoldOut_BillRunsAfterOrderDrawn 是 P0 资金 bug 的回归测试
+// （openspec: add-batch-settlement 步骤 7.7 时序约束）。
+//
+// 背景：GenerateForBox 只聚合 status='drawn' 且未被账单收录的订单
+// （ListBoxDrawnOrders）。若售罄落定早于订单落库 / 状态推进，清空库存的
+// **这一单**就不在聚合集合里 —— 账单 GMV 少算一单、供应商少收打款。
+//
+// 断言的是**调用顺序**（sequence），而非调用次数：
+//
+//	CreateOrder → UpdateStatus(paid) → CreateItems → UpdateStatus(drawn) → FinalizeSoldOut
+//
+// 旧实现把 FinalizeSoldOut 放在 CreateOrder 之前，本测试会红。
+func TestDraw_SoldOut_BillRunsAfterOrderDrawn(t *testing.T) {
+	d := defaultDeps()
+
+	var seq []string
+	d.order.createOrderFunc = func(c *gin.Context, order *mall.MallDrawOrder) error {
+		seq = append(seq, "create_order")
+		return nil
+	}
+	d.order.createItemsFunc = func(c *gin.Context, items []mall.MallDrawOrderItem) error {
+		seq = append(seq, "create_items")
+		return nil
+	}
+	d.order.updateStatusFunc = func(c *gin.Context, id int64, s mall.MallDrawOrderStatus) error {
+		seq = append(seq, "status_"+string(s))
+		return nil
+	}
+	bill := &fakeBillSvc{finalizeFunc: func(c *gin.Context, boxID int64) error {
+		seq = append(seq, "finalize")
+		return nil
+	}}
+	d.billSvc = bill
+	d.cp.subtotalStockFunc = func(c *gin.Context, poolID int64) (int64, error) {
+		return 0, nil // 最后一单扣减后清零 → 触发售罄落定
+	}
+
+	svc := newSvcFromDeps(d)
+	if _, err := svc.Draw(newDrawCtx(), 1, 9); err != nil {
+		t.Fatalf("Draw: %v", err)
+	}
+
+	want := []string{"create_order", "status_paid", "create_items", "status_drawn", "finalize"}
+	if len(seq) != len(want) {
+		t.Fatalf("call sequence = %v, want %v", seq, want)
+	}
+	for i := range want {
+		if seq[i] != want[i] {
+			t.Fatalf("call sequence = %v, want %v (finalize 必须在订单 drawn 之后)", seq, want)
+		}
+	}
+}
+
+// 说明：秒杀链路（DrawSeckill 步骤 4.g++）存在同样的时序约束，且已同步修正
+// （见 draw.go 中该处注释）。此处不重复搭 Redis + 秒杀仓储的重型 fixture——
+// 验收集成阶段由端到端冒烟覆盖「秒杀清空库存那单必须出现在账单明细」。
+// 两条链路共用同一个 settleSoldOutIfEmpty，时序修正方式一致。

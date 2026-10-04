@@ -60,17 +60,17 @@ func TestBlindBoxRepository_ListBySupplier(t *testing.T) {
 	}
 }
 
-// TestBlindBoxRepository_ListFeaturedOnSale 验证三条件 AND。
+// TestBlindBoxRepository_ListFeaturedOnSale 验证四条件 AND（含 lifecycle=selling）。
 func TestBlindBoxRepository_ListFeaturedOnSale(t *testing.T) {
 	c, mock := newMockContext(t)
 
 	mock.ExpectQuery(`(?i)SELECT count`).
-		WithArgs(true, mall.StatusActive, true).
+		WithArgs(true, mall.StatusActive, true, mall.LifecycleSelling).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 	rows := sqlmock.NewRows([]string{"id", "name"}).
 		AddRow(int64(7), "Featured Box")
 	mock.ExpectQuery(`(?i)SELECT`).
-		WithArgs(true, mall.StatusActive, true, sqlmock.AnyArg()).
+		WithArgs(true, mall.StatusActive, true, mall.LifecycleSelling, sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
 	items, total, err := NewBlindBoxRepository().ListFeaturedOnSale(c, repository.ListOptions{Page: 1, PageSize: 20})
@@ -101,16 +101,16 @@ func TestBlindBoxRepository_ListActiveOnSaleBySupplierIDs_Empty(t *testing.T) {
 	}
 }
 
-// TestBlindBoxRepository_ListActiveOnSaleBySupplierIDs_Found 验证 IN + 状态过滤。
+// TestBlindBoxRepository_ListActiveOnSaleBySupplierIDs_Found 验证 IN + 状态过滤 + lifecycle。
 func TestBlindBoxRepository_ListActiveOnSaleBySupplierIDs_Found(t *testing.T) {
 	c, mock := newMockContext(t)
 
 	mock.ExpectQuery(`(?i)SELECT count`).
-		WithArgs(int64(1), int64(2), mall.StatusActive, true).
+		WithArgs(int64(1), int64(2), mall.StatusActive, true, mall.LifecycleSelling).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 	rows := sqlmock.NewRows([]string{"id", "supplier_id"}).AddRow(int64(1), int64(1))
 	mock.ExpectQuery(`(?i)SELECT`).
-		WithArgs(int64(1), int64(2), mall.StatusActive, true, sqlmock.AnyArg()).
+		WithArgs(int64(1), int64(2), mall.StatusActive, true, mall.LifecycleSelling, sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
 	items, total, err := NewBlindBoxRepository().ListActiveOnSaleBySupplierIDs(c, []int64{1, 2}, repository.ListOptions{Page: 1, PageSize: 20})

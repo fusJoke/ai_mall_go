@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -448,6 +449,35 @@ func TestFeed_UsesCorrectIndexNames(t *testing.T) {
 	}
 	if fake.searchCalls[1] != SupplierIndex {
 		t.Errorf("second call index = %q, want %q", fake.searchCalls[1], SupplierIndex)
+	}
+}
+
+// TestFeed_BlindBoxQueryFiltersSellingLifecycle 验证 feed 盲盒查询带
+// lifecycle=selling 的读时防线（v2 双层防御第二层）。
+//
+// 写侧（cmd/es-sync）已只收录 selling，但增量同步有延迟窗口；读侧 term filter
+// 让售罄/已结算商品「隐藏准实时生效」，避免用户点进去才发现已售罄。
+func TestFeed_BlindBoxQueryFiltersSellingLifecycle(t *testing.T) {
+	var bbQuery []byte
+	fake := &fakeSearchClient{
+		search: func(index string, query []byte) (hits []search.Hit, total int64, err error) {
+			if index == BlindBoxIndex {
+				bbQuery = append([]byte(nil), query...)
+			}
+			return nil, 0, nil
+		},
+	}
+	svc := newFeedSvc(fake)
+	_, _ = svc.Feed(newHomeCtx().Request.Context())
+
+	if len(bbQuery) == 0 {
+		t.Fatal("blind box query not captured")
+	}
+	if !strings.Contains(string(bbQuery), `"lifecycle"`) || !strings.Contains(string(bbQuery), `"selling"`) {
+		t.Errorf("blind box feed query missing lifecycle=selling filter: %s", bbQuery)
+	}
+	if strings.Contains(string(bbQuery), "match_all") {
+		t.Errorf("blind box feed query should not be match_all (读时防线要求 filter): %s", bbQuery)
 	}
 }
 

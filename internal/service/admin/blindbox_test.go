@@ -273,7 +273,7 @@ func TestAdminBlindBoxToggleOnSale_NotFound(t *testing.T) {
 func TestAdminBlindBoxToggleOnSale_FalseToTrue(t *testing.T) {
 	repo := &adminBlindBoxRepo{
 		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
-			return &mall.MallBlindBox{ID: id, OnSale: false}, nil
+			return &mall.MallBlindBox{ID: id, OnSale: false, Lifecycle: mall.LifecycleSelling}, nil
 		},
 	}
 	svc := newAdminBlindBoxSvc(repo)
@@ -291,7 +291,7 @@ func TestAdminBlindBoxToggleOnSale_FalseToTrue(t *testing.T) {
 func TestAdminBlindBoxToggleOnSale_TrueToFalse(t *testing.T) {
 	repo := &adminBlindBoxRepo{
 		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
-			return &mall.MallBlindBox{ID: id, OnSale: true}, nil
+			return &mall.MallBlindBox{ID: id, OnSale: true, Lifecycle: mall.LifecycleSelling}, nil
 		},
 	}
 	svc := newAdminBlindBoxSvc(repo)
@@ -307,7 +307,7 @@ func TestAdminBlindBoxToggleOnSale_ToggleErrorPropagates(t *testing.T) {
 	wantErr := errors.New("repo: update fail")
 	repo := &adminBlindBoxRepo{
 		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
-			return &mall.MallBlindBox{ID: id, OnSale: true}, nil
+			return &mall.MallBlindBox{ID: id, OnSale: true, Lifecycle: mall.LifecycleSelling}, nil
 		},
 		toggleOnSaleFunc: func(c *gin.Context, id int64, onSale bool) error {
 			return wantErr
@@ -317,6 +317,31 @@ func TestAdminBlindBoxToggleOnSale_ToggleErrorPropagates(t *testing.T) {
 	err := svc.ToggleOnSale(newAdminBlindBoxCtx(), 1)
 	if !errors.Is(err, wantErr) {
 		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+}
+
+// TestAdminBlindBoxToggleOnSale_LifecycleForbidden 售罄/已结算批次不可切换上下架。
+//
+// 同 supplier 侧守卫：sold_out 不可逆进入结算、settled 是归档终态；
+// admin 强制上下架同样必须被拦，否则归档商品会回到 C 端曝光。
+func TestAdminBlindBoxToggleOnSale_LifecycleForbidden(t *testing.T) {
+	for _, lc := range []mall.MallBlindBoxLifecycle{mall.LifecycleSoldOut, mall.LifecycleSettled} {
+		t.Run(string(lc), func(t *testing.T) {
+			repo := &adminBlindBoxRepo{
+				getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+					return &mall.MallBlindBox{ID: id, OnSale: true, Lifecycle: lc}, nil
+				},
+			}
+			svc := newAdminBlindBoxSvc(repo)
+
+			err := svc.ToggleOnSale(newAdminBlindBoxCtx(), 1)
+			if !errors.Is(err, ErrLifecycleForbidden) {
+				t.Errorf("ToggleOnSale(%s) = %v, want ErrLifecycleForbidden", lc, err)
+			}
+			if repo.toggleOnSaleCalls != 0 {
+				t.Errorf("ToggleOnSale called %d times, want 0 (守卫必须先于写库)", repo.toggleOnSaleCalls)
+			}
+		})
 	}
 }
 

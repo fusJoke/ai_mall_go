@@ -15,7 +15,7 @@
 ## 3. Service 层（TDD：先测后码）
 
 - [x] 3.1 `internal/service/mall/bill.go`（中立包，user/admin 共用）：`GenerateForBox(tx, boxID)`（聚合该商品全部 drawn 订单→按 commission_rate 快照算 commission/payout→建账单+明细，幂等：已有账单则跳过）、`MarkPaid`（confirmed→paid CAS + `supplier.balance -= payout` 同事务 + 商品置 settled）、`Regenerate`。+ 单测。验收：`go test ./internal/service/mall/`
-- [x] 3.2 `internal/service/user/draw.go` 事务尾部（普通+秒杀两处，7.5/7.6 之后加 7.7）：扣减后 `pool_total_stock=0` → 盲盒 `lifecycle: selling→sold_out`（CAS）→ 调 `GenerateForBox` 同事务建账单。+ 单测（未售罄不触发/售罄触发一次/重复触发幂等）。验收：`go test ./internal/service/user/`
+- [x] 3.2 `internal/service/user/draw.go` 事务尾部（普通+秒杀两处）：扣减后 `pool_total_stock=0` → 盲盒 `lifecycle: selling→sold_out`（CAS）→ 调 `GenerateForBox` 同事务建账单。**时序约束（P0 修正）**：必须在订单 `status='drawn'` 落定**之后**调用——`GenerateForBox` 聚合的是 `status='drawn'` 且未被账单收录的订单，提前调用会漏掉清空库存的那一单（详见 design 流程 C-2）。+ 单测（未售罄不触发/售罄触发一次/重复触发幂等/**调用顺序断言：finalize 晚于 status_drawn**）。验收：`go test ./internal/service/user/`
 - [x] 3.3 `internal/service/supplier/bill.go`：List（自己的）/Detail（校验归属）/Confirm（generated→confirmed）/Reject（generated→rejected，必填原因）。+ 单测
 - [x] 3.4 `internal/service/supplier/product.go` 加 `Duplicate`：校验归属→事务内复制商品+卡池（weight 结构保留、stock 置 0、名称建议"第 N 期"）→ 返回新 boxID。+ 单测
 
@@ -34,11 +34,17 @@
 
 ## 6. ES 视图层
 
-- [ ] 6.1 `cmd/es-sync`：收录查询加 `lifecycle='selling'` 条件；diff 模式——Search 现有 `_id` 集与 MySQL 在售全集对比，`Delete` 差集（防售罄文档滞留）
-- [ ] 6.2 `internal/service/user/home.go` feed 查询 DSL 加 `filter: [active, on_sale, selling]`（读时防线）。验收：`go test ./internal/service/user/`
+- [x] 6.1 `cmd/es-sync`：收录查询加 `lifecycle='selling'` 条件（**v2 口径**：`status=active AND on_sale=true AND lifecycle='selling'` 的全部在售商品，`is_featured` 降为排序字段）；文档投影加 `lifecycle` 字段；diff 模式——Search 现有 `_id` 集与 MySQL 在售全集对比，`Delete` 差集（防售罄文档滞留）
+- [x] 6.2 `internal/service/user/home.go` feed 查询 DSL 加 `term filter lifecycle=selling`（读时防线，第二层）。验收：`go test ./internal/service/user/`
 
-## 7. 验证与收尾
+## 7. 生命周期约束（C 端可见性）
 
-- [ ] 7.1 `go build ./... && go test ./... && go vet ./internal/...`（新改包必须过）
-- [ ] 7.2 端到端冒烟（seed 数据）：上架商品→连续抽卡至售罄→账单自动生成→供应商确认→admin 打款→商品 settled、balance 扣减正确
-- [ ] 7.3 openspec 归档：本 change 标记完成，`add-supplier-application`（入驻流）另立 change
+- [x] 7.1 `internal/repository/mall/blindbox_repository.go`：`ListFeaturedOnSale` / `ListActiveOnSaleBySupplierIDs` 加 `lifecycle='selling'`（售罄/已结算商品不再出现在 C 端列表）
+- [x] 7.2 `internal/service/supplier/product.go` + `internal/service/admin/`：`ToggleOnSale` 加生命周期守卫（`lifecycle != selling` → 拒绝，`ErrLifecycleForbidden` → 409/422）；admin 侧同步。+ 单测
+
+## 8. 验证与收尾
+
+- [x] 8.1 `go build ./... && go test ./... && go vet ./internal/...`（新改包必须过）
+- [ ] 8.2 端到端冒烟（seed 数据）：上架商品→连续抽卡至售罄→**校验售罄那单出现在账单明细**→供应商确认→admin 打款→商品 settled、balance 扣减正确
+- [ ] 8.3 补 spec delta：新增 `openspec/changes/add-batch-settlement/specs/` 目录，沉淀关键行为（账单聚合全部 drawn 订单、ES 双层过滤、lifecycle 状态约束）为可归档 spec
+- [ ] 8.4 openspec 归档：本 change 标记完成，`add-supplier-application`（入驻流）另立 change

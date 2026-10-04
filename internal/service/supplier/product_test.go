@@ -559,7 +559,7 @@ func TestProductToggleOnSale_Forbidden(t *testing.T) {
 func TestProductToggleOnSale_Success_OnAndOff(t *testing.T) {
 	d := defaultProductDeps()
 	d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
-		return &mall.MallBlindBox{ID: id, SupplierID: 7}, nil
+		return &mall.MallBlindBox{ID: id, SupplierID: 7, Lifecycle: mall.LifecycleSelling}, nil
 	}
 	svc := newProductSvcFromDeps(d)
 
@@ -584,6 +584,31 @@ func TestProductToggleOnSale_Success_OnAndOff(t *testing.T) {
 	}
 	if d.cache.delCalls != 2 {
 		t.Errorf("cache.Del called %d times, want 2", d.cache.delCalls)
+	}
+}
+
+// TestProductToggleOnSale_LifecycleForbidden 售罄/已结算批次不可再上架。
+//
+// 设计状态机要点：sold_out 不可逆进入结算、settled 是归档终态，off_sale 只适用于
+// selling。允许 toggle 会让归档商品重新进入 C 端曝光（配合 Duplicate 的
+//「复制 sold_out 商品」路径，攻击面真实存在）。
+func TestProductToggleOnSale_LifecycleForbidden(t *testing.T) {
+	for _, lc := range []mall.MallBlindBoxLifecycle{mall.LifecycleSoldOut, mall.LifecycleSettled} {
+		t.Run(string(lc), func(t *testing.T) {
+			d := defaultProductDeps()
+			d.bb.getByIDFunc = func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+				return &mall.MallBlindBox{ID: id, SupplierID: 7, Lifecycle: lc}, nil
+			}
+			svc := newProductSvcFromDeps(d)
+
+			err := svc.ToggleOnSale(newProductCtx(), 7, 1, true)
+			if !errors.Is(err, ErrLifecycleForbidden) {
+				t.Errorf("ToggleOnSale(%s) = %v, want ErrLifecycleForbidden", lc, err)
+			}
+			if d.bb.toggleOnSaleCalls != 0 {
+				t.Errorf("ToggleOnSale called %d times, want 0 (守卫必须先于写库)", d.bb.toggleOnSaleCalls)
+			}
+		})
 	}
 }
 

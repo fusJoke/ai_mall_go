@@ -299,6 +299,12 @@ func writeMallAdminToggleErr(c *gin.Context, codeNS string, err error) {
 			"code":    codeNS + ".not_found",
 			"message": "target not found",
 		})
+	case errors.Is(err, adminSvc.ErrLifecycleForbidden):
+		// 售罄/已结算批次不可再切换上下架（同 supplier 侧守卫）。
+		c.JSON(http.StatusConflict, gin.H{
+			"code":    codeNS + ".lifecycle_forbidden",
+			"message": "blindbox lifecycle does not allow on-sale toggle",
+		})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    codeNS + ".internal",

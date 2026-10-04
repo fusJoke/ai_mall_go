@@ -44,6 +44,13 @@ var (
 
 	// ErrEmptyPool 卡池 items 为空。
 	ErrEmptyPool = errors.New("supplier.product: card pool must have at least one item")
+
+	// ErrLifecycleForbidden 生命周期不允许该操作（→ 409）。
+	//
+	// 设计状态机要点（openspec: add-batch-settlement）：sold_out 是「卖完了」
+	// 不可逆进入结算，settled 是归档终态；off_sale 只适用于 selling。
+	// 对 sold_out/settled 商品 toggle-onsale 会把已归档批次重新推向 C 端曝光。
+	ErrLifecycleForbidden = errors.New("supplier.product: blindbox lifecycle does not allow this operation")
 )
 
 // 业务常量。
@@ -287,6 +294,12 @@ func (s *baseProductService) ToggleOnSale(c *gin.Context, supplierID, blindBoxID
 	}
 	if existing.SupplierID != supplierID {
 		return ErrBlindBoxForbidden
+	}
+
+	// 生命周期守卫：sold_out（售罄结算中）/ settled（已结算归档）不允许再上架 ——
+	// 卖完的批次不可逆进入结算；允许 toggle 会让归档商品重新进入 C 端曝光。
+	if existing.Lifecycle != mall.LifecycleSelling {
+		return ErrLifecycleForbidden
 	}
 
 	if err := s.bb.ToggleOnSale(c, blindBoxID, onSale); err != nil {

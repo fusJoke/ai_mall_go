@@ -342,13 +342,6 @@ func (s *baseDrawService) Draw(c *gin.Context, userID, blindBoxID int64) (*DrawR
 			return err
 		}
 
-		// 7.7 售罄检测（openspec: add-batch-settlement）：扣减后池内总库存为 0 →
-		// 商品 lifecycle selling→sold_out（CAS）+ 幂等生成批次账单，与抽卡事务原子提交。
-		// 账单生成失败 → 整笔事务回滚（用户不会为「没有账单的抽卡」付款）。
-		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, blindBoxID); err != nil {
-			return err
-		}
-
 		// 8. 落订单（uuid v7 作 order_no；初始 status=pending，paid/drawn 由
 		//    状态机校验后通过 repo.UpdateStatus 推进）。状态机包 internal/domain/state。
 		orderNo, err := newOrderNo()
@@ -396,6 +389,19 @@ func (s *baseDrawService) Draw(c *gin.Context, userID, blindBoxID int64) (*DrawR
 			return err
 		}
 		if err := s.order.UpdateStatus(txCtx, order.ID, mall.OrderStatusDrawn); err != nil {
+			return err
+		}
+
+		// 7.7 售罄检测（openspec: add-batch-settlement）：扣减后池内总库存为 0 →
+		// 商品 lifecycle selling→sold_out（CAS）+ 幂等生成批次账单，与抽卡事务原子提交。
+		// 账单生成失败 → 整笔事务回滚（用户不会为「没有账单的抽卡」付款）。
+		//
+		// 【时序约束·P0】必须落在订单 status=drawn 之后：GenerateForBox 聚合的是
+		// status='drawn' 且未被账单收录的订单（ListBoxDrawnOrders）。若提前到本步之前，
+		// 清空库存的**这一单**尚未落库/未 drawn，会被排除在批次账单之外——
+		// 账单 GMV 少算一单、供应商少收打款，且该单游离在账单之外存在被周期结算
+		// 二次收录的风险。见 openspec design 流程 C-2「聚合该商品全部 drawn 订单」。
+		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, blindBoxID); err != nil {
 			return err
 		}
 
@@ -820,9 +826,10 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 
 		// 4.g++ 售罄检测（openspec: add-batch-settlement）：同 7.7，秒杀链路售罄
 		// 同样落定 lifecycle 并生成批次账单（原子提交）。
-		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, bb.ID); err != nil {
-			return err
-		}
+		//
+		// 【时序约束·P0】必须在订单 status=drawn 之后调用 —— 同 Draw() 的 7.7 说明：
+		// GenerateForBox 只聚合 status='drawn' 的订单，提前调用会漏掉清空库存的这一单。
+		// 位置见本函数下方（状态机推进 paid→drawn 之后）。
 
 		// 4.d 落订单（source='seckill'；初始 status=pending，由状态机推到 paid/drawn）。
 		orderNo, err := newOrderNo()
@@ -869,6 +876,11 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 			return err
 		}
 		if err := s.order.UpdateStatus(txCtx, order.ID, mall.OrderStatusDrawn); err != nil {
+			return err
+		}
+
+		// 4.g++ 售罄检测（同上文说明）：订单已是 drawn，本单才会被账单聚合收录。
+		if err := settleSoldOutIfEmpty(txCtx, s.cp, s.billSvc, pool.ID, bb.ID); err != nil {
 			return err
 		}
 

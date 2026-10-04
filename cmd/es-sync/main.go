@@ -87,10 +87,14 @@ type blindBoxInput struct {
 	Price        float64
 	PromoPrice   *float64
 	Items        []mall.MallCardPoolItem
+	Lifecycle    mall.MallBlindBoxLifecycle
 	CreatedAt    time.Time
 }
 
 // blindBoxDoc 是 mall_blind_box_index 的文档形态（D7 投影，snake_case）。
+//
+// Lifecycle 字段是 v2 双层防御的**读侧依据**：即便写侧漏过（如增量同步延迟），
+// feed DSL 也能用 term filter 兜住售罄/已结算商品，避免 C 端曝光。
 type blindBoxDoc struct {
 	ID            int64     `json:"id"`
 	SupplierID    int64     `json:"supplier_id"`
@@ -101,6 +105,7 @@ type blindBoxDoc struct {
 	PromoPrice    *float64  `json:"promo_price,omitempty"`
 	RaritySummary string    `json:"rarity_summary"`
 	HotScore      int       `json:"hot_score"`
+	Lifecycle     string    `json:"lifecycle"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -116,6 +121,7 @@ func projectBlindBox(in blindBoxInput) blindBoxDoc {
 		PromoPrice:    in.PromoPrice,
 		RaritySummary: buildRaritySummary(in.Items),
 		HotScore:      0, // MVP 无热度来源，默认 0；排序退化为 created_at DESC
+		Lifecycle:     string(in.Lifecycle),
 		CreatedAt:     in.CreatedAt,
 	}
 }
@@ -148,9 +154,16 @@ func syncBlindBoxes(ctx context.Context, db *gorm.DB, client search.SearchClient
 	now := time.Now()
 
 	// 1. MySQL 侧：满足条件的盲盒 + 供应商名。
+	//
+	// v2 收录口径（商品即批次）：status=active AND on_sale=true AND
+	// lifecycle='selling' —— 「全部在售商品」，is_featured 降为排序字段
+	// （不再是收录门槛）。lifecycle 条件是关键：售罄商品 on_sale 仍为 true，
+	// 不筛 lifecycle 会永久滞留索引；且 deleteStale 依赖本查询的差集，
+	// 查询不含 lifecycle 就永远删不掉售罄文档。
 	var boxes []mall.MallBlindBox
 	if err := db.WithContext(ctx).
-		Where("status = ? AND on_sale = ? AND is_featured = ?", mall.StatusActive, true, true).
+		Where("status = ? AND on_sale = ? AND lifecycle = ?",
+			mall.StatusActive, true, mall.LifecycleSelling).
 		Find(&boxes).Error; err != nil {
 		return 0, fmt.Errorf("query blind boxes: %w", err)
 	}
@@ -244,6 +257,7 @@ func syncBlindBoxes(ctx context.Context, db *gorm.DB, client search.SearchClient
 			Cover:        b.Cover,
 			Price:        b.Price,
 			Items:        poolItemsByBox[b.ID],
+			Lifecycle:    b.Lifecycle,
 			CreatedAt:    b.CreatedAt,
 		}
 		if promo, ok := promoPriceByBox[b.ID]; ok {

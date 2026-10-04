@@ -327,6 +327,9 @@ func mapProductErr(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "product.invalid_weight_sum"
 	case errors.Is(err, supplierSvc.ErrEmptyPool):
 		return http.StatusUnprocessableEntity, "product.empty_pool"
+	case errors.Is(err, supplierSvc.ErrLifecycleForbidden):
+		// 售罄/已结算批次不可再上架（卖完的批次不可逆进入结算）。
+		return http.StatusConflict, "product.lifecycle_forbidden"
 	default:
 		return http.StatusInternalServerError, "product.internal"
 	}

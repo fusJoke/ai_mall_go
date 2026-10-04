@@ -33,6 +33,13 @@ var (
 	// 由 handler 统一映射 404；service 层将 gorm.ErrRecordNotFound 转成此 sentinel，
 	// 避免暴露 ORM 细节。
 	ErrBlindBoxNotFound = errors.New("admin.blindbox: not found")
+
+	// ErrLifecycleForbidden 生命周期不允许上架（→ 409）。
+	//
+	// 同 supplier 侧：sold_out（售罄结算中）/ settled（已结算归档）不可再切换
+	// on_sale —— 卖完的批次不可逆进入结算，重新上架会让归档商品回到 C 端曝光。
+	// 仅 lifecycle=selling 允许 toggle。
+	ErrLifecycleForbidden = errors.New("admin.blindbox: lifecycle does not allow on-sale toggle")
 )
 
 // BlindBoxService 是 admin 视角的盲盒管理接口。
@@ -50,7 +57,7 @@ type BlindBoxService interface {
 
 	// ToggleOnSale 翻转 on_sale 列（true↔false）。
 	//
-	// 不存在 → ErrBlindBoxNotFound。
+	// 不存在 → ErrBlindBoxNotFound；lifecycle != selling → ErrLifecycleForbidden。
 	ToggleOnSale(c *gin.Context, blindBoxID int64) error
 
 	// ToggleFeatured 翻转 is_featured 列（true↔false）。
@@ -119,6 +126,11 @@ func (s *baseBlindBoxService) ToggleOnSale(c *gin.Context, blindBoxID int64) err
 	}
 	if existing == nil {
 		return ErrBlindBoxNotFound
+	}
+
+	// 生命周期守卫：仅 selling 可切换上下架（sold_out/settled 已进入结算/归档）。
+	if existing.Lifecycle != mall.LifecycleSelling {
+		return ErrLifecycleForbidden
 	}
 
 	return s.repo.ToggleOnSale(c, blindBoxID, !existing.OnSale)

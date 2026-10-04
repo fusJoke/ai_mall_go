@@ -55,6 +55,7 @@ func TestProjectBlindBox(t *testing.T) {
 			{Rarity: mall.RarityN, Weight: 9700},
 		},
 		CreatedAt: time.Unix(1791024000, 0).UTC(),
+		Lifecycle: mall.LifecycleSelling,
 	})
 
 	if doc.ID != 1 || doc.SupplierID != 10 || doc.SupplierName != "Panini 旗舰店" {
@@ -72,6 +73,10 @@ func TestProjectBlindBox(t *testing.T) {
 	if doc.HotScore != 0 {
 		t.Errorf("hot_score = %d, want 0 (MVP 无来源，默认 0)", doc.HotScore)
 	}
+	// v2 双层防御：文档必须带 lifecycle，读侧 feed DSL 才能 term filter 兜底。
+	if doc.Lifecycle != string(mall.LifecycleSelling) {
+		t.Errorf("lifecycle = %q, want %q", doc.Lifecycle, mall.LifecycleSelling)
+	}
 
 	// JSON 字段名必须是 snake_case（与 service/user/home.go 的反序列化 DTO 对齐）。
 	b, err := json.Marshal(doc)
@@ -82,7 +87,7 @@ func TestProjectBlindBox(t *testing.T) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"id", "supplier_id", "supplier_name", "name", "cover", "price", "rarity_summary", "hot_score", "created_at"} {
+	for _, key := range []string{"id", "supplier_id", "supplier_name", "name", "cover", "price", "rarity_summary", "hot_score", "lifecycle", "created_at"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("missing json key %q in %s", key, b)
 		}

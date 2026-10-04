@@ -89,10 +89,15 @@ func (r *gormBlindBoxRepository) ListBySupplier(c *gin.Context, supplierID int64
 	return items, total, nil
 }
 
-// ListFeaturedOnSale 拉「推荐 + 启用 + 在售」盲盒。
+// ListFeaturedOnSale 拉「推荐 + 启用 + 在售 + 销售中」盲盒。
+//
+// lifecycle='selling' 是 v2 新增条件（商品即批次）：售罄（sold_out）/已结算
+// （settled）商品 on_sale 仍为 true，不筛 lifecycle 会一直出现在 C 端列表，
+// 用户点进详情才发现「已售罄」。
 func (r *gormBlindBoxRepository) ListFeaturedOnSale(c *gin.Context, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	db := repository.DB(c).Model(&mall.MallBlindBox{}).
-		Where("is_featured = ? AND status = ? AND on_sale = ?", true, mall.StatusActive, true)
+		Where("is_featured = ? AND status = ? AND on_sale = ? AND lifecycle = ?",
+			true, mall.StatusActive, true, mall.LifecycleSelling)
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -113,13 +118,16 @@ func (r *gormBlindBoxRepository) ListFeaturedOnSale(c *gin.Context, opts reposit
 	return items, total, nil
 }
 
-// ListActiveOnSaleBySupplierIDs 按供应商 id 集合批量取「启用 + 在售」盲盒。
+// ListActiveOnSaleBySupplierIDs 按供应商 id 集合批量取「启用 + 在售 + 销售中」盲盒。
+//
+// lifecycle='selling' 同 ListFeaturedOnSale：售罄/已结算商品不进入 C 端列表。
 func (r *gormBlindBoxRepository) ListActiveOnSaleBySupplierIDs(c *gin.Context, supplierIDs []int64, opts repository.ListOptions) ([]mall.MallBlindBox, int64, error) {
 	if len(supplierIDs) == 0 {
 		return make([]mall.MallBlindBox, 0), 0, nil
 	}
 	db := repository.DB(c).Model(&mall.MallBlindBox{}).
-		Where("supplier_id IN ? AND status = ? AND on_sale = ?", supplierIDs, mall.StatusActive, true)
+		Where("supplier_id IN ? AND status = ? AND on_sale = ? AND lifecycle = ?",
+			supplierIDs, mall.StatusActive, true, mall.LifecycleSelling)
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
