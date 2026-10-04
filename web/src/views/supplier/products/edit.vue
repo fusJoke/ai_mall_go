@@ -1,9 +1,33 @@
-<!-- src\views\supplier\products\edit.vue — 盲盒新建 / 编辑页（任务 6.10）。
-     新建（无 :id）：表单 + 卡池条目编辑器（weight 加和校验 10000，后端 422 兜底）。
-     编辑（有 :id）：仅名称/封面/价格/描述（卡池不可改 —— service 限制，前端隐藏）。 -->
+<!-- src\views\supplier\products\edit.vue — 盲盒新建 / 编辑页（任务 6.10；5.3 批次化增强）。
+     新建（无 :id）：表单 + 卡池条目编辑器（weight 加和校验 10000）+ 默认下架提示。
+     编辑（有 :id）：基础信息 + lifecycle 分级 ——
+       selling：可重写卡池（补库存/调概率；已开卖后端 409 pool_locked 锁定）；
+       sold_out/settled：卡池已固化，仅可编辑基础信息。 -->
 <template>
     <div class="page">
         <h2 class="title">{{ isEdit ? t('supplier.products.dialog.edit') : t('supplier.products.dialog.create') }}</h2>
+
+        <el-alert
+            v-if="!isEdit"
+            :title="t('supplier.products.dialog.defaultOffSaleHint')"
+            type="info"
+            :closable="false"
+            class="hint"
+        />
+        <el-alert
+            v-else-if="poolEditable"
+            :title="t('supplier.products.dialog.sellingPoolHint')"
+            type="info"
+            :closable="false"
+            class="hint"
+        />
+        <el-alert
+            v-else
+            :title="t('supplier.products.dialog.lockedPoolHint')"
+            type="warning"
+            :closable="false"
+            class="hint"
+        />
 
         <el-form :model="form" label-width="140px" class="form">
             <el-form-item :label="t('supplier.products.dialog.name')" required>
@@ -19,7 +43,7 @@
                 <el-input v-model="form.description" type="textarea" :rows="3" maxlength="500" />
             </el-form-item>
 
-            <template v-if="!isEdit">
+            <template v-if="poolEditable">
                 <el-form-item :label="t('supplier.products.dialog.poolItems')">
                     <div class="pool-editor">
                         <div v-for="(item, idx) in form.items" :key="idx" class="pool-row">
@@ -62,9 +86,11 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
     supplierProductCreate,
+    supplierProductDetail,
     supplierProductEdit,
-    supplierProductList,
+    supplierProductUpdatePool,
     type PoolItemPayload,
+    type SupplierBoxLifecycle,
 } from '/@/api/supplier/product'
 import { useSupplierInfo } from '/@/stores/supplier/supplierInfo'
 
@@ -75,6 +101,10 @@ const supplierInfo = useSupplierInfo()
 
 const isEdit = computed(() => Boolean(route.params.id))
 const saving = ref(false)
+const editLifecycle = ref<SupplierBoxLifecycle>('selling')
+
+/** 卡池编辑器可见性：新建 / selling 批次；sold_out/settled 固化不可改。 */
+const poolEditable = computed(() => !isEdit.value || editLifecycle.value === 'selling')
 
 const form = reactive({
     name: '',
@@ -90,19 +120,56 @@ function addItem() {
     form.items.push({ card_id: 1, rarity: 'N', weight: 0, stock: 0 })
 }
 
-/** 编辑态拉取当前行（列表即取回全部字段，按 id 定位）。 */
+/** 编辑态拉详情（box 基础信息 + 卡池条目预填；替代旧的全列表翻找）。 */
 async function loadRow(id: number) {
-    const { data } = await supplierProductList({ page: 1, page_size: 200 })
-    const row = (data.items ?? []).find((it) => it.id === id)
-    if (!row) {
-        ElMessage.error(t('user.orders.notFound'))
-        router.back()
-        return
+    const { data } = await supplierProductDetail(id)
+    const box = data.box
+    form.name = box.name
+    form.cover = box.cover
+    form.price = Number(box.price)
+    form.description = box.description
+    editLifecycle.value = box.lifecycle
+    form.items = (data.items ?? []).map((it) => ({
+        card_id: Number(it.card_id),
+        rarity: it.rarity,
+        weight: Number(it.weight),
+        stock: Number(it.stock),
+    }))
+}
+
+function validatePool(): boolean {
+    if (!poolEditable.value) return true
+    if (form.items.length === 0) {
+        ElMessage.warning(t('supplier.products.dialog.poolItems'))
+        return false
     }
-    form.name = row.name
-    form.cover = row.cover
-    form.price = Number(row.price)
-    form.description = row.description
+    if (weightSum.value !== 10000) {
+        ElMessage.warning(t('supplier.products.dialog.weightSumInvalid'))
+        return false
+    }
+    return true
+}
+
+/** 操作类错误提示；409 双码区分（后端 product.* 约定）。 */
+function showActionError(err: unknown): boolean {
+    const anyErr = err as { response?: { status?: number; data?: { code?: string; message?: string } } }
+    if (anyErr?.response?.status === 401) {
+        supplierInfo.reset()
+        router.push('/supplier/login')
+        return true
+    }
+    const code = anyErr?.response?.data?.code ?? ''
+    const key =
+        {
+            product_pool_locked: 'supplier.products.dialog.poolLocked',
+            product_lifecycle_forbidden: 'supplier.products.dialog.lockedPoolHint',
+        }[code.replaceAll('.', '_')] ?? ''
+    if (key) {
+        ElMessage.error(t(key))
+        return true
+    }
+    ElMessage.error(anyErr?.response?.data?.message || code || 'Error')
+    return true
 }
 
 async function save() {
@@ -110,6 +177,11 @@ async function save() {
     try {
         if (isEdit.value) {
             const id = Number(route.params.id)
+            // 卡池先于基础信息保存：改池失败（pool_locked 等）时不落基础信息，避免半套状态。
+            if (poolEditable.value && !validatePool()) return
+            if (poolEditable.value) {
+                await supplierProductUpdatePool(id, form.items)
+            }
             await supplierProductEdit({
                 id,
                 name: form.name || undefined,
@@ -123,14 +195,7 @@ async function save() {
                 ElMessage.warning(t('supplier.products.dialog.name'))
                 return
             }
-            if (form.items.length === 0) {
-                ElMessage.warning(t('supplier.products.dialog.poolItems'))
-                return
-            }
-            if (weightSum.value !== 10000) {
-                ElMessage.warning(t('supplier.products.dialog.weightSumInvalid'))
-                return
-            }
+            if (!validatePool()) return
             await supplierProductCreate({
                 name: form.name,
                 cover: form.cover || undefined,
@@ -142,14 +207,7 @@ async function save() {
         }
         router.push('/supplier/products')
     } catch (err) {
-        const anyErr = err as { response?: { status?: number; data?: { code?: string; message?: string } } }
-        if (anyErr?.response?.status === 401) {
-            supplierInfo.reset()
-            router.push('/supplier/login')
-            return
-        }
-        // 业务错误码透出（422 weight/empty_pool 等）。
-        ElMessage.error(anyErr?.response?.data?.message || anyErr?.response?.data?.code || 'Error')
+        showActionError(err)
     } finally {
         saving.value = false
     }
@@ -179,6 +237,9 @@ onMounted(() => {
     margin: 0 0 20px;
     font-size: 20px;
     color: #0f172a;
+}
+.hint {
+    margin-bottom: 16px;
 }
 .form {
     max-width: 640px;

@@ -16,6 +16,10 @@ products:
   title: 盲盒商品
   create: 新建盲盒
   edit: 编辑
+  tabAll: 全部
+  lifecycleSelling: 销售中
+  lifecycleSoldOut: 已售罄
+  lifecycleSettled: 已结算
   columns:
     id: ID
     name: 名称
@@ -24,7 +28,15 @@ products:
     onSale: 在售
     isFeatured: 推荐位
     status: 状态
+    lifecycle: 生命周期
+    progress: 销售进度
     createdAt: 创建时间
+  progressNone: 暂无数据
+  action:
+    onSale: 上架
+    offSale: 下架
+    duplicate: 再来一批
+  duplicateSuccess: 已复制新批次，请重填卡池库存后再上架
   dialog:
     create: 新建盲盒（含卡池）
     edit: 编辑盲盒
@@ -42,9 +54,10 @@ products:
     weightSumInvalid: 卡池权重加和必须等于 10000
     save: 保存
     cancel: 取消
-  action:
-    onSale: 上架
-    offSale: 下架
+    defaultOffSaleHint: 新批次创建后默认下架，填好卡池库存后再手动上架
+    sellingPoolHint: 销售中且未开卖的批次可调整卡池（库存/权重）；已开卖后卡池锁定
+    lockedPoolHint: 该批次已售罄或已结算，卡池与概率已固化，仅可查看基础信息
+    poolLocked: 该批次已开卖，卡池不可修改
   statusActive: 启用
   statusDisabled: 禁用
 promotions:

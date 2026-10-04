@@ -4,6 +4,8 @@
 import request from '/@/utils/request'
 import { useSupplierInfo } from '/@/stores/supplier/supplierInfo'
 
+export type SupplierBoxLifecycle = 'selling' | 'sold_out' | 'settled'
+
 export interface SupplierBlindBox {
     id: number
     supplier_id: number
@@ -14,7 +16,14 @@ export interface SupplierBlindBox {
     on_sale: boolean
     is_featured: boolean
     description: string
+    lifecycle: SupplierBoxLifecycle
     created_at: string
+}
+
+/** 单盒销售进度快照（remaining=剩余可抽，sold=已售出）。 */
+export interface SupplierPoolStat {
+    remaining: number
+    sold: number
 }
 
 export interface SupplierBlindBoxListResponse {
@@ -22,6 +31,8 @@ export interface SupplierBlindBoxListResponse {
     total: number
     page: number
     page_size: number
+    /** key 为盲盒 ID 字符串（JSON map key 序列化）；缺 key = 未统计。 */
+    stats: Record<string, SupplierPoolStat>
 }
 
 export interface PoolItemPayload {
@@ -31,13 +42,41 @@ export interface PoolItemPayload {
     stock: number
 }
 
-export function supplierProductList(params: { page?: number; page_size?: number }) {
+/** 我的盲盒列表；lifecycle 空 = 全部（状态筛选 tab）。 */
+export function supplierProductList(params: {
+    lifecycle?: string
+    page?: number
+    page_size?: number
+}) {
     const supplierInfo = useSupplierInfo()
     return request.request<SupplierBlindBoxListResponse>({
         url: '/supplier/products/list',
         method: 'GET',
         params,
         headers: { Authorization: `Bearer ${supplierInfo.token}` },
+    })
+}
+
+/** 盲盒详情（含卡池条目，编辑页预填；sold_out/settled 只读可见）。 */
+export function supplierProductDetail(id: number) {
+    const supplierInfo = useSupplierInfo()
+    return request.request<{ box: SupplierBlindBox; items: PoolItemPayload[] }>({
+        url: '/supplier/products/detail',
+        method: 'GET',
+        params: { id },
+        headers: { Authorization: `Bearer ${supplierInfo.token}` },
+    })
+}
+
+/** 重写卡池条目（补库存/调概率）；409 = lifecycle_forbidden / pool_locked（已开卖）。 */
+export function supplierProductUpdatePool(id: number, items: PoolItemPayload[]) {
+    const supplierInfo = useSupplierInfo()
+    return request.request({
+        url: '/supplier/products/update-pool',
+        method: 'POST',
+        data: { id, items },
+        headers: { Authorization: `Bearer ${supplierInfo.token}` },
+        __opts: { showErrorMessage: false },
     })
 }
 

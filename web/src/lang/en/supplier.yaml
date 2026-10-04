@@ -16,6 +16,10 @@ products:
   title: Blind Box Products
   create: New Blind Box
   edit: Edit
+  tabAll: All
+  lifecycleSelling: Selling
+  lifecycleSoldOut: Sold Out
+  lifecycleSettled: Settled
   columns:
     id: ID
     name: Name
@@ -24,7 +28,15 @@ products:
     onSale: On Sale
     isFeatured: Featured
     status: Status
+    lifecycle: Lifecycle
+    progress: Progress
     createdAt: Created At
+  progressNone: N/A
+  action:
+    onSale: Put On Sale
+    offSale: Take Off Sale
+    duplicate: New Batch
+  duplicateSuccess: Batch duplicated. Refill pool stock before putting it on sale
   dialog:
     create: New Blind Box (with pool)
     edit: Edit Blind Box
@@ -42,9 +54,10 @@ products:
     weightSumInvalid: Pool item weights must sum to 10000
     save: Save
     cancel: Cancel
-  action:
-    onSale: Put On Sale
-    offSale: Take Off Sale
+    defaultOffSaleHint: New batches are created off-sale. Refill pool stock, then put it on sale manually
+    sellingPoolHint: Selling batches with no orders can adjust the pool (stock/weights); pool locks after first sale
+    lockedPoolHint: This batch is sold out or settled. Pool and odds are frozen; only basic info is editable
+    poolLocked: This batch has started selling, pool can no longer be modified
   statusActive: Active
   statusDisabled: Disabled
 promotions:
