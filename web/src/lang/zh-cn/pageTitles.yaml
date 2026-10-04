@@ -19,6 +19,8 @@ supplierProducts: 盲盒商品
 supplierProductEdit: 编辑盲盒
 supplierSeckill: 秒杀活动
 supplierSeckillEdit: 编辑秒杀
+supplierBills: 账单中心
+supplierBillDetail: 账单详情
 adminSupplier: 供应商管理
 adminBlindbox: 盲盒管理
 adminPromotion: 促销活动

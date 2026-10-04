@@ -12,6 +12,7 @@
                     <RouterLink to="/supplier/products" class="nav-link">{{ t('supplier.products.title') }}</RouterLink>
                     <RouterLink to="/supplier/promotions" class="nav-link">{{ t('supplier.promotions.title') }}</RouterLink>
                     <RouterLink to="/supplier/seckill" class="nav-link">{{ t('supplier.seckill.title') }}</RouterLink>
+                    <RouterLink to="/supplier/bills" class="nav-link">{{ t('supplier.bills.title') }}</RouterLink>
                 </nav>
                 <div class="user-area">
                     <template v-if="supplierInfo.token">

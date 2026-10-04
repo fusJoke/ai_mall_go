@@ -119,3 +119,58 @@ seckill:
   notFound: Flash sale not found
   redisInitFailed: Redis stock initialization failed, please retry
   failed: Operation failed, please retry
+bills:
+  title: Billing Center
+  empty: No bills yet
+  tabAll: All
+  columns:
+    id: Bill No.
+    blindBox: Blind Box ID
+    totalAmount: Total GMV
+    commission: Commission
+    payout: Payout
+    status: Status
+    version: Version
+    createdAt: Generated At
+  status:
+    generated: Pending Confirm
+    confirmed: Pending Payout
+    rejected: Rejected
+    failed: Payout Failed
+    paid: Paid
+  detail:
+    back: Back to List
+    title: Bill Detail
+    blindBox: Blind Box ID
+    rate: Commission Rate
+    version: Version
+    createdAt: Generated At
+    confirmedAt: Confirmed At
+    paidAt: Paid At
+    rejectReason: Reject Reason
+    remark: Remark
+    gmv: Total GMV
+    commission: Platform Commission
+    payout: Payout Amount
+    items: Order Items
+    itemsEmpty: No order items
+    orderNo: Order No.
+    orderAmount: Amount
+    orderCommission: Commission
+    orderPayout: Payout
+    orderTime: Time
+  action:
+    confirm: Confirm Bill
+    reject: Reject Bill
+    confirmAsk: Confirm the amounts and wait for platform payout?
+    rejectTitle: Reject Bill
+    rejectPlaceholder: Reason is required
+    rejectRequired: Reject reason cannot be empty
+  confirmed: Confirmed, waiting for platform payout
+  rejected: Rejected, waiting for re-audit
+  notFound: Bill not found
+  forbidden: No access to this bill
+  invalidTransition: Operation not allowed in current status
+  statusConflict: The bill was modified by someone else, please refresh
+  loadFailed: Failed to load bills
+  failed: Operation failed, please retry

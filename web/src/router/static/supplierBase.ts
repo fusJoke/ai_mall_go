@@ -74,6 +74,24 @@ const supplierBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 账单中心
+            path: 'bills',
+            name: 'supplierBills',
+            component: () => import('/@/views/supplier/bills/index.vue'),
+            meta: {
+                title: 'pageTitles.supplierBills',
+            },
+        },
+        {
+            // 账单详情
+            path: 'bills/detail/:id',
+            name: 'supplierBillDetail',
+            component: () => import('/@/views/supplier/bills/detail.vue'),
+            meta: {
+                title: 'pageTitles.supplierBillDetail',
+            },
+        },
+        {
             // /supplier 子路径兜底
             path: ':path(.*)*',
             redirect: '/404',
