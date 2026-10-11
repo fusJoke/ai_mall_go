@@ -89,11 +89,23 @@ async function load() {
             page: page.value,
             page_size: pageSize,
             status: filters.status || undefined,
+            // 注意：后端 internal/handler/admin/mall.go 的 List 是按**字符串**
+            // `switch c.Query("is_featured") { case "true"/"false" }` 匹配的，
+            // 因此这里必须传字符串 "true"/"false"（el-option 的 value 亦为字符串），
+            // 不要"修正"成 boolean —— axios 序列化后仍是 "true"/"false"，
+            // 改类型只会让 API 层 `boolean | string` 的声明失去意义。
             is_featured: filters.featured || undefined,
             name: filters.name || undefined,
         })
         items.value = data.items ?? []
         total.value = data.total
+    } catch (err) {
+        // 与下方 toggleStatus / toggleFeatured 保持一致：列表加载失败也要有可见反馈，
+        // 否则请求 reject 后会变成 unhandled rejection，用户只看到一张空表。
+        // 注意 request 拦截器已对 HTTP/业务错误弹过默认文案，这里不重复弹。
+        items.value = []
+        total.value = 0
+        console.error('[admin/supplier] load failed', err)
     } finally {
         loading.value = false
     }

@@ -1,4 +1,5 @@
 searchSimple: Search is actually very simple
+fullscreen: Enter full screen
 exitFullscreen: Exit full screen
 menuTypeUnrecognized: Navigation failed, the menu type is unrecognized!
 invalidRoute: Invalid route

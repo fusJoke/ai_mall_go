@@ -22,6 +22,9 @@ coverage.html
 # web 前端依赖
 /web/node_modules/
 /web/dist/
+# 构建前把旧 dist 改名留存的备份（例如 `mv dist dist.old-build-<date>`），
+# 属临时产物，不得入库；否则会被 review 工具当作「提交了构建产物」误报。
+/web/dist.old-*/
 
 # 根目录不应直接存在前端 manifest（仅 web/ 目录允许）
 /package.json

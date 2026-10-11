@@ -12,10 +12,10 @@
             <el-table-column prop="id" :label="t('supplier.promotions.columns.id')" width="64" />
             <el-table-column prop="blind_box_id" :label="t('supplier.promotions.columns.blindBox')" width="100" />
             <el-table-column :label="t('supplier.promotions.columns.originalPrice')" width="110">
-                <template #default="{ row }">¥{{ Number(row.original_price).toFixed(2) }}</template>
+                <template #default="{ row }">¥{{ fmtPrice(row.original_price) }}</template>
             </el-table-column>
             <el-table-column :label="t('supplier.promotions.columns.promoPrice')" width="110">
-                <template #default="{ row }">¥{{ Number(row.promo_price).toFixed(2) }}</template>
+                <template #default="{ row }">¥{{ fmtPrice(row.promo_price) }}</template>
             </el-table-column>
             <el-table-column :label="t('supplier.promotions.columns.startAt')" min-width="150">
                 <template #default="{ row }">{{ new Date(row.start_at).toLocaleString() }}</template>
@@ -111,6 +111,12 @@ function requireLogin(): boolean {
     return false
 }
 
+/** 金额展示兜底：null / undefined / 非数值统一显示 0.00，避免表格出现「¥NaN」。 */
+function fmtPrice(v: unknown): string {
+    const n = Number(v)
+    return (Number.isFinite(n) ? n : 0).toFixed(2)
+}
+
 async function load() {
     if (!requireLogin()) return
     loading.value = true
@@ -136,12 +142,24 @@ function openCreate() {
 
 function openEdit(row: SupplierPromotion) {
     dialogEditId.value = row.id
-    dialogForm.original_price = Number(row.original_price)
-    dialogForm.promo_price = Number(row.promo_price)
+    // 空值守卫：后端可能返回 null / 缺字段（历史脏数据），Number(null) === 0 尚可，
+    // 但 Number(undefined) === NaN 会污染表单，并让 save() 的 `promo >= original`
+    // 比较恒为 false（NaN 参与任何比较都是 false），从而绕过校验把 NaN 提交给后端。
+    const op = Number(row.original_price)
+    const pp = Number(row.promo_price)
+    dialogForm.original_price = Number.isFinite(op) ? op : 0
+    dialogForm.promo_price = Number.isFinite(pp) ? pp : 0
     dialogVisible.value = true
 }
 
 async function save() {
+    // 兜底再校验一次有限性：el-input-number 清空时 v-model 会是 null，
+    // 此时 `null >= null` 为 true 能拦住，但 `null >= 0` 等组合仍有漏网，
+    // 显式拒绝非有限值，避免 NaN / null 写坏服务端数据。
+    if (!Number.isFinite(dialogForm.original_price) || !Number.isFinite(dialogForm.promo_price)) {
+        ElMessage.warning(t('supplier.promotions.invalidPrice'))
+        return
+    }
     if (dialogForm.promo_price >= dialogForm.original_price) {
         ElMessage.warning(t('supplier.promotions.dialog.promoPriceInvalid'))
         return

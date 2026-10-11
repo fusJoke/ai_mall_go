@@ -25,7 +25,7 @@
 
             <div class="order-bar">
                 <span>{{ t('user.drawResult.orderNo') }}: {{ result.order_no }}</span>
-                <span>{{ t('user.drawResult.actualPrice') }}: ¥{{ result.actual_price.toFixed(2) }}</span>
+                <span>{{ t('user.drawResult.actualPrice') }}: ¥{{ actualPriceText }}</span>
             </div>
 
             <div class="actions">
@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { takeDrawResult, type DrawResultPayload } from '/@/utils/drawResult'
@@ -53,6 +53,16 @@ const { t } = useI18n()
 const router = useRouter()
 
 const result = ref<DrawResultPayload | null>(null)
+
+/**
+ * 实付金额展示兜底。sessionStorage 反序列化出的对象不受 TS 类型约束
+ * （类型声明为 number 只是「写侧承诺」），历史缓存可能缺字段或为 null，
+ * 直接 `.toFixed(2)` 会抛 TypeError 导致整页白屏，故此处显式守卫。
+ */
+const actualPriceText = computed(() => {
+    const n = Number(result.value?.actual_price)
+    return (Number.isFinite(n) ? n : 0).toFixed(2)
+})
 
 onMounted(() => {
     result.value = takeDrawResult()

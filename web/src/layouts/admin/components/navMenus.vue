@@ -42,7 +42,7 @@
         </div>
 
         <!-- 全屏切换 -->
-        <div class="nav-menu-item" :title="state.isFullScreen ? $t('layouts.exitFullscreen') : $t('layouts.FullScreen')" @click="onFullScreen">
+        <div class="nav-menu-item" :title="state.isFullScreen ? $t('layouts.exitFullscreen') : $t('layouts.fullscreen')" @click="onFullScreen">
             <Icon
                 :color="config.getColorVal('headerBarTabColor')"
                 class="nav-menu-icon"

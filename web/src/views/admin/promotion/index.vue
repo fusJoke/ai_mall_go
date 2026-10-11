@@ -9,10 +9,10 @@
             <el-table-column prop="supplier_id" :label="t('admin.mall.promotion.columns.supplierId')" width="110" />
             <el-table-column prop="blind_box_id" :label="t('admin.mall.promotion.columns.blindBoxId')" width="110" />
             <el-table-column :label="t('supplier.promotions.columns.originalPrice')" width="110">
-                <template #default="{ row }">¥{{ Number(row.original_price).toFixed(2) }}</template>
+                <template #default="{ row }">¥{{ fmtPrice(row.original_price) }}</template>
             </el-table-column>
             <el-table-column :label="t('supplier.promotions.columns.promoPrice')" width="110">
-                <template #default="{ row }">¥{{ Number(row.promo_price).toFixed(2) }}</template>
+                <template #default="{ row }">¥{{ fmtPrice(row.promo_price) }}</template>
             </el-table-column>
             <el-table-column :label="t('supplier.promotions.columns.startAt')" min-width="150">
                 <template #default="{ row }">{{ new Date(row.start_at).toLocaleString() }}</template>
@@ -45,6 +45,12 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+
+/** 金额展示兜底：null / undefined / 非数值统一显示 0.00，避免表格出现「¥NaN」。 */
+function fmtPrice(v: unknown): string {
+    const n = Number(v)
+    return (Number.isFinite(n) ? n : 0).toFixed(2)
+}
 
 async function load() {
     loading.value = true

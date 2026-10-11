@@ -14,7 +14,12 @@ export interface DrawCardSnapshot {
 export interface DrawResultPayload {
     order_id: number
     order_no: string
-    actual_price: number
+    /**
+     * 实付金额。声明为 `number | null`：本接口是 sessionStorage 反序列化的产物，
+     * `JSON.parse` 的结果不受编译期约束（历史缓存 / 旧版本写入的数据可能缺字段），
+     * 消费方必须自行兜底，不能假定它一定是 number。
+     */
+    actual_price: number | null
     /** 来源页路径（普通抽卡 /user/blindbox/:id，秒杀 /user/seckill/:id），「再抽一单」返回用。 */
     source_path?: string
     cards: DrawCardSnapshot[]
