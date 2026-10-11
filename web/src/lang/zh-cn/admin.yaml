@@ -115,6 +115,59 @@ mall:
   common:
     search: 搜索
     actions: 操作
+    cancel: 取消
+  bill:
+    title: 批次账单
+    tabAll: 全部
+    empty: 暂无批次账单
+    supplierFilter: 供应商 ID
+    regenerated: 账单已重核，等待供应商确认
+    markPaidOk: 打款完成，已从供应商余额扣减
+    notFound: 账单不存在
+    invalidTransition: 当前状态不允许该操作，请刷新后重试
+    statusConflict: 账单状态已被并发修改，请刷新后重试
+    boxLifecycleConflict: 商品生命周期已被并发修改，请刷新后重试
+    insufficientBalance: 供应商可用余额不足，无法打款
+    failed: 操作失败，请稍后重试
+    columns:
+      id: 账单 ID
+      blindBoxId: 商品 ID
+      supplierId: 供应商 ID
+      totalAmount: 批次总额
+      commissionRate: 手续费率
+      commissionAmount: 手续费
+      payoutAmount: 应打款额
+      status: 状态
+      version: 版本
+      rejectReason: 驳回原因
+      remark: 备注
+      paidAt: 打款时间
+      createdAt: 生成时间
+    status:
+      generated: 待确认
+      confirmed: 已确认
+      rejected: 已驳回
+      failed: 打款失败
+      paid: 已打款
+    action:
+      detail: 详情
+      regenerate: 重核金额
+      markPaid: 确认打款
+    dialog:
+      detail: 账单详情
+      regenerate: 重核账单金额
+      regenerateHint: 重核后账单回到「待确认」并 version+1，供应商需重新确认。
+      remarkPlaceholder: 重核说明（选填）
+      markPaid: 确认打款
+      markPaidConfirm: 确认向该供应商打款？该操作会立即执行且不可撤销：
+      bill: 账单
+      supplier: 供应商
+      deduct: 供应商余额扣减
+      markPaidTail: 打款后账单置「已打款」、商品置「已结算」，并占用该供应商待结算余额。
+    detail:
+      items: 订单明细
+      orderId: 订单 ID
+      noItems: 该账单暂无订单明细
   supplier:
     statusFilter: 状态筛选
     featuredFilter: 推荐位筛选

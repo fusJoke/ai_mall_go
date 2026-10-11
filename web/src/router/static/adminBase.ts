@@ -117,6 +117,17 @@ const adminBaseRoute: RouteRecordRaw = {
             },
         },
         {
+            // 静态子路由：批次账单管理页（add-batch-settlement 5.4）
+            // 商品即批次 v2：售罄自动生成账单，admin 在此重核 rejected / 打款 confirmed。
+            path: 'bills',
+            name: 'adminBill',
+            component: () => import('/@/views/admin/bills/index.vue'),
+            meta: {
+                title: 'pageTitles.adminBill',
+                noAuth: false,
+            },
+        },
+        {
             // 后台子路径兜底 — 走 loading 路由，让 loading 页面尝试从后端懒加载目标路由
             path: ':path(.*)*',
             redirect: (to) => {

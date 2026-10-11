@@ -113,6 +113,59 @@ mall:
   common:
     search: Search
     actions: Actions
+    cancel: Cancel
+  bill:
+    title: Batch Bills
+    tabAll: All
+    empty: No batch bills
+    supplierFilter: Supplier ID
+    regenerated: Bill regenerated, awaiting supplier confirmation
+    markPaidOk: Paid — deducted from supplier balance
+    notFound: Bill not found
+    invalidTransition: Action not allowed in current state, please refresh and retry
+    statusConflict: Bill status was changed concurrently, please refresh and retry
+    boxLifecycleConflict: Box lifecycle was changed concurrently, please refresh and retry
+    insufficientBalance: Supplier available balance is insufficient for payout
+    failed: Operation failed, please try again later
+    columns:
+      id: Bill ID
+      blindBoxId: Box ID
+      supplierId: Supplier ID
+      totalAmount: Batch Total
+      commissionRate: Commission Rate
+      commissionAmount: Commission
+      payoutAmount: Payout
+      status: Status
+      version: Ver
+      rejectReason: Reject Reason
+      remark: Remark
+      paidAt: Paid At
+      createdAt: Created At
+    status:
+      generated: Awaiting Confirm
+      confirmed: Confirmed
+      rejected: Rejected
+      failed: Payout Failed
+      paid: Paid
+    action:
+      detail: Detail
+      regenerate: Regenerate
+      markPaid: Mark Paid
+    dialog:
+      detail: Bill Detail
+      regenerate: Regenerate Bill Amount
+      regenerateHint: Regenerating moves the bill back to "Awaiting Confirm" with version+1; the supplier must confirm again.
+      remarkPlaceholder: Regenerate note (optional)
+      markPaid: Confirm Payout
+      markPaidConfirm: Pay this supplier now? This action takes effect immediately and cannot be undone:
+      bill: Bill
+      supplier: Supplier
+      deduct: Deduct from supplier balance
+      markPaidTail: After payout the bill becomes "Paid" and the box becomes "Settled", consuming the supplier's pending balance.
+    detail:
+      items: Order Items
+      orderId: Order ID
+      noItems: No order items in this bill
   supplier:
     statusFilter: Status
     featuredFilter: Featured
