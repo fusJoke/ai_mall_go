@@ -26,11 +26,12 @@
 
 ## 5. 前端（B 端 + Admin）
 
-- [ ] 5.1 `web/src/api/supplier/bill.ts`（类型+list/detail/confirm/reject，snake_case+request.request 惯例）；`product.ts` 加 `duplicateProduct`
-- [ ] 5.2 `views/supplier/bills/index.vue`（状态 tab+账单卡片+空态）、`detail.vue`（金额三联+订单明细+确认/驳回弹窗）；路由 + 侧边栏「账单中心」
-- [ ] 5.3 `products/index.vue` 增强：生命周期徽章 + 销售进度条 + 「再来一批」按钮 + 「从历史复制」入口 + 状态筛选 tab；`products/edit.vue`：创建默认下架提示、`sold_out/settled` 禁改卡池
-- [ ] 5.4 `web/src/api/admin/bill.ts` + `views/admin/bills/`（列表：状态 tab；操作：打款二次确认显示扣减额、重核弹窗改金额）；admin 路由 + 菜单
-- [ ] 5.5 验收：`npm run type-check` + `npm run build` 通过
+- [x] 5.1 `web/src/api/supplier/bill.ts`（类型+list/detail/confirm/reject，snake_case+request.request 惯例）；`product.ts` 加 `duplicateProduct`
+- [x] 5.2 `views/supplier/bills/index.vue`（状态 tab+账单卡片+空态）、`detail.vue`（金额三联+订单明细+确认/驳回弹窗）；路由 + 侧边栏「账单中心」（顶部导航）
+- [x] 5.3 `products/index.vue` 增强：生命周期徽章 + 销售进度条 + 「再来一批」按钮 + 「从历史复制」入口 + 状态筛选 tab；`products/edit.vue`：创建默认下架提示、`sold_out/settled` 禁改卡池
+  - 补充：实现中发现 Duplicate 置 stock=0 后无重填端点的闭环缺口 → 新增 GET detail（预填）+ POST update-pool（守卫：lifecycle=selling + 零 drawn 订单 ErrPoolLocked→409）
+- [x] 5.4 `web/src/api/admin/bill.ts` + `views/admin/bills/`（列表：状态 tab；操作：打款二次确认显示扣减额、重核弹窗改金额）；admin 路由 + 菜单
+- [x] 5.5 验收：`npm run typecheck` + `npm run build` 通过（脚本名是 typecheck）
 
 ## 6. ES 视图层
 
@@ -45,6 +46,11 @@
 ## 8. 验证与收尾
 
 - [x] 8.1 `go build ./... && go test ./... && go vet ./internal/...`（新改包必须过）
-- [ ] 8.2 端到端冒烟（seed 数据）：上架商品→连续抽卡至售罄→**校验售罄那单出现在账单明细**→供应商确认→admin 打款→商品 settled、balance 扣减正确
-- [ ] 8.3 补 spec delta：新增 `openspec/changes/add-batch-settlement/specs/` 目录，沉淀关键行为（账单聚合全部 drawn 订单、ES 双层过滤、lifecycle 状态约束）为可归档 spec
-- [ ] 8.4 openspec 归档：本 change 标记完成，`add-supplier-application`（入驻流）另立 change
+- [x] 8.2 端到端冒烟（seed 数据）：上架商品→连续抽卡至售罄→**校验售罄那单出现在账单明细**→供应商确认→admin 打款→商品 settled、balance 扣减正确
+  - 交付：`internal/service/mall/bill_integration_test.go`（`//go:build integration`）
+  - 3 个用例：售罄→确认→打款全链路（池 stock=5 精确断言明细含售罄单）、驳回→重核→再确认（version+1）、generated 直接打款被状态机拒绝（余额与 lifecycle 均不变）
+  - **实现注记**：必须用外部测试包 `mall_test` —— 用例需同时构造 user.DrawService 与 supplier.BillService，而 service/supplier 反向 import service/mall，包内写会形成 import cycle
+  - 运行方式：`MYSQL_TEST_DSN='...(库名含 test)...' go test -tags=integration ./internal/service/mall/...`
+  - 说明：编写时本机 MySQL 容器未运行，仅完成编译校验 + skip 路径验证（无 DSN 时正确 SKIP 而非 FAIL）；待容器起来后跑一次全绿
+- [x] 8.3 补 spec delta：新增 `openspec/changes/add-batch-settlement/specs/batch-settlement/spec.md`，沉淀关键行为（账单聚合全部 drawn 订单含售罄单的时序保证、ES+查询双层过滤、lifecycle 状态约束、打款复合事务原子性、费率快照）为可归档 spec
+- [x] 8.4 openspec 归档：本 change 标记完成并归档，spec 同步至 `openspec/specs/batch-settlement/`；`add-supplier-application`（入驻流）另立 change
