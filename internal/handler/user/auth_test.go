@@ -79,10 +79,16 @@ type mockUserService struct {
 	loginFunc  func(c *gin.Context, username, password, captchaKey string, points []captchaInfra.Point, remember bool) (*model.User, string, error)
 	logoutFunc func(ctx context.Context, rawToken string) error
 
+	// getByIDFunc 供 Profile 测试注入（默认返回 ErrRecordNotFound）。
+	// 单列而非并入 loginFunc：Profile 走的是 CRUDService 的 GetByID 而非 Login。
+	getByIDFunc func(c *gin.Context, id int64) (*model.User, error)
+
 	// 记录调用次数
-	loginCalls  int
-	logoutCalls int
-	lastLogout  string
+	loginCalls   int
+	logoutCalls  int
+	lastLogout   string
+	getByIDCalls int
+	lastGetByID  int64
 }
 
 func (m *mockUserService) Login(c *gin.Context, username, password, captchaKey string, points []captchaInfra.Point, remember bool) (*model.User, string, error) {
@@ -108,6 +114,11 @@ func (m *mockUserService) List(c *gin.Context, opts repository.ListOptions) ([]m
 	return nil, 0, nil
 }
 func (m *mockUserService) GetByID(c *gin.Context, id int64) (*model.User, error) {
+	m.getByIDCalls++
+	m.lastGetByID = id
+	if m.getByIDFunc != nil {
+		return m.getByIDFunc(c, id)
+	}
 	return nil, gorm.ErrRecordNotFound
 }
 func (m *mockUserService) Update(c *gin.Context, e *model.User) error { return nil }

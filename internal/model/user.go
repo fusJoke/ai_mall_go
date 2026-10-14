@@ -59,6 +59,13 @@ type User struct {
 	// Password 哈希后的密码（bcrypt / argon2 等，长度预留 255）。
 	Password string `gorm:"comment:密码(已哈希);size:255;not null;default:''"`
 
+	// RegisterSource 注册来源：h5_mobile（H5 手机号自动建号）/ admin（后台预建）
+	// / import（数据导入）等；nil 表示未知或历史数据（存量用户未回填）。
+	//
+	// 由 migration 000017 引入。本期仅落结构与字段，写入逻辑随
+	// POST /user/login/mobile 的服务端实现落地。
+	RegisterSource *string `gorm:"comment:注册来源(h5_mobile/admin/import等,NULL=未知);size:16"`
+
 	// UpdatedAt 更新时间（GORM 自动维护）。
 	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
 

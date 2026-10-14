@@ -15,6 +15,7 @@
 //	GET  /user/seckill/list           公开   当前生效秒杀活动列表
 //	GET  /user/seckill/detail         公开   秒杀活动详情（限购 + 实时剩余名额）
 //	POST /user/seckill/:id/draw       登录   秒杀抽卡（UserAuth + 限流 30 次/分钟）
+//	GET  /user/profile                登录   当前用户信息（含最新余额）
 //	GET  /user/orders/list            登录   我的订单
 //	GET  /user/orders/detail          登录   订单详情
 //	GET  /user/home/feed              公开   ES 首页推荐流
@@ -136,12 +137,13 @@ func ensureDeps() {
 		})
 		orderH = userHandler.NewOrderHandler(orderSvc)
 
-		// 首页 feed（ES 只读 + 多层缓存 L1/L2）。
+		// 首页 feed（ES 只读 + 多层缓存 L1/L2；ES 不可用时降级 MySQL）。
 		feedSvc := userSvc.NewFeedService(userSvc.FeedServiceDeps{
-			Search:   search.Get(),
-			Hotspot:  hotspotInfra.Get(), // D21：feed 走热点缓存（60s 逻辑过期）
-			Cache:    cache.Get(),
-			CacheTTL: config.Get().Cache.TTL.HomeFeed.L2,
+			Search:       search.Get(),
+			FallbackRepo: mallRepo.NewFeedRepository(), // 降级通道（capability home-feed-fallback）
+			Hotspot:      hotspotInfra.Get(),           // D21：feed 走热点缓存（60s 逻辑过期）
+			Cache:        cache.Get(),
+			CacheTTL:     config.Get().Cache.TTL.HomeFeed.L2,
 		})
 		homeH = userHandler.NewHomeHandler(feedSvc)
 
@@ -220,6 +222,11 @@ func registerUserRoutes() {
 	// --- 订单（登录态） ---
 	registry.Register("/user", http.MethodGet, "/orders/list", wrap(func(c *gin.Context) { orderH.List(c) }), middleware.UserAuth())
 	registry.Register("/user", http.MethodGet, "/orders/detail", wrap(func(c *gin.Context) { orderH.Detail(c) }), middleware.UserAuth())
+
+	// --- 当前用户信息（登录态） ---
+	// 与 /logout 同属 authH：两者都只依赖「当前用户」而无独立业务逻辑，
+	// 且响应结构（userInfo）与登录响应共用同一类型定义。
+	registry.Register("/user", http.MethodGet, "/profile", wrap(func(c *gin.Context) { authH.Profile(c) }), middleware.UserAuth())
 
 	// --- 首页 feed（公开） ---
 	registry.Register("/user", http.MethodGet, "/home/feed", wrap(func(c *gin.Context) { homeH.Feed(c) }))
