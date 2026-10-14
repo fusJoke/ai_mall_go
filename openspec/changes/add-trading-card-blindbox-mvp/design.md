@@ -224,11 +224,12 @@ type notFoundSentinel struct{}
 ### D6：ES 索引只读 + 离线全量同步
 
 - 索引：`mall_blind_box_index`、`mall_supplier_index`
-- 过滤：盲盒 `status=active AND on_sale=true AND is_featured=true`，供应商 `status=active AND is_featured=true`
+- 过滤：盲盒 `status=active AND on_sale=true AND lifecycle='selling'`（口径沿革：原文为 `is_featured=true`，自 change `add-batch-settlement`「商品即批次」起 is_featured 降为排序字段、不再作为收录门槛），供应商 `status=active AND is_featured=true`
 - 应用进程**只读 ES**，不写 ES
 - `cmd/es-sync` 独立入口，全量读 MySQL → 全量覆盖 ES 索引（delete + bulk index），幂等可重跑
 - 触发方式：手动（开发态）/ CI pipeline / 部署 hook / cron
-- ES 不可用：应用启动期 fail fast；运行期首页接口直接 5xx，不 fallback
+- ES 不可用：应用**启动期** fail fast（`search.Init` Ping 失败即退出）；**运行期**首页接口降级查询 MySQL 并返回 200，仅当降级查询亦失败才 5xx
+  （修订：原表述为「运行期首页接口直接 5xx」，已由 change `add-uni-h5-client` 的 capability `home-feed-fallback` 修订）
 
 为什么独立脚本而非应用内同步：
 - 写时同步：应用 hot path 增加延迟

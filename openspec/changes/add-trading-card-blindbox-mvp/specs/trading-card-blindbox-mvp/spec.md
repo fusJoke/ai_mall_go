@@ -342,20 +342,29 @@
 
 ### Requirement: Home feed via Elasticsearch
 
-首页 feed 接口 SHALL 走 ES 查询（不直查 MySQL）：
+首页 feed 接口 SHALL 以 Elasticsearch 为主检索路径：
 
-- 索引 `mall_blind_box_index`：过滤 `status=active AND on_sale=true AND is_featured=true`，按 `hot_score DESC, created_at DESC` 排序
+- 索引 `mall_blind_box_index`：过滤 `status=active AND on_sale=true AND lifecycle='selling'`（且其供应商 `status=active`），按 `hot_score DESC, created_at DESC` 排序
+  - 口径沿革：自 change `add-batch-settlement`（「商品即批次」）起，`is_featured` 不再是盲盒的收录门槛，仅作排序字段；本行以**当前生效口径**为准，不再要求 `is_featured=true`。
 - 索引 `mall_supplier_index`：过滤 `status=active AND is_featured=true`，按 `featured_rank ASC, blind_box_count DESC` 排序
 - 应用层只读 ES，文档形态是"投影"（见 design D7）
-- ES 不可用 → HTTP 500 + `code=search_unavailable`（不 fallback）
+- ES 不可用（连接失败 / 超时 / 索引 schema 漂移）→ SHALL 降级查询 MySQL，响应结构与主路径同构
+  （修订：详见 change `add-uni-h5-client` 的 capability `home-feed-fallback`）
+- 仅当 ES 与 MySQL 降级查询**均**失败 → HTTP 500 + `code=search_unavailable`
 
-#### Scenario: ES query returns featured items
+#### Scenario: ES query returns on-sale items
 - **WHEN** GET /api/v1/user/home/feed 调用
-- **THEN** 响应包含 featured 盲盒列表 + featured 供应商列表，按上述规则排序
+- **THEN** 响应包含在售盲盒列表 + featured 供应商列表，按上述规则排序
 
-#### Scenario: ES unavailable fails fast
-- **WHEN** ES 连接超时
-- **THEN** 接口返回 HTTP 500 + `code=search_unavailable`，不查 MySQL 兜底
+#### Scenario: ES unavailable degrades to MySQL
+- **WHEN** ES 连接超时或查询报错
+- **THEN** 接口 SHALL 降级查询 MySQL 并返回 HTTP 200（响应结构与主路径一致）
+- **AND** 响应 MUST 携带标识数据来源的响应头
+- **AND** 仅当降级查询亦失败时，才返回 HTTP 500 + `code=search_unavailable`
+
+> 本条修订自原表述「ES 不可用 → HTTP 500 + `code=search_unavailable`（不 fallback）」。
+> 修订原因：ES 抖动导致 C 端首页整体不可用，是可用性事故；降级到 MySQL 可保持
+> 首页可用。互斥表述 MUST NOT 残留。
 
 ---
 
@@ -363,7 +372,8 @@
 
 `cmd/es-sync` 入口 SHALL 全量同步：
 
-- 读 MySQL：盲盒 `WHERE status=active AND on_sale=true AND is_featured=true`，供应商 `WHERE status=active AND is_featured=true`
+- 读 MySQL：盲盒 `WHERE status=active AND on_sale=true AND lifecycle='selling'`（并过滤供应商 `status=active`），供应商 `WHERE status=active AND is_featured=true`
+  - 口径沿革：自 change `add-batch-settlement` 起盲盒不再要求 `is_featured=true`，改按生命周期收录。
 - 转 ES 投影（见 design D7）
 - delete + bulk index 全量覆盖 ES 索引
 - 输出同步统计：`mall_blind_box_index: N records synced in M ms` / `mall_supplier_index: ...`

@@ -139,7 +139,7 @@ func TestFeed_CacheHit(t *testing.T) {
 		CacheTTL: 5 * time.Minute,
 	})
 
-	feed, err := svc.Feed(newHomeCtx().Request.Context())
+	feed, err := svc.Feed(newHomeCtx())
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestFeed_CacheMissESFallback(t *testing.T) {
 		CacheTTL: wantTTL,
 	})
 
-	_, err := svc.Feed(newHomeCtx().Request.Context())
+	_, err := svc.Feed(newHomeCtx())
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestFeed_NoCache(t *testing.T) {
 		Cache:    nil, // 显式 nil
 		CacheTTL: 5 * time.Minute,
 	})
-	_, err := svc.Feed(newHomeCtx().Request.Context())
+	_, err := svc.Feed(newHomeCtx())
 	if err != nil {
 		t.Errorf("Feed with nil cache: %v, want nil", err)
 	}
@@ -236,7 +236,7 @@ func TestFeed_CacheTTLZero_NoBackfill(t *testing.T) {
 		Cache:    fakeCache,
 		CacheTTL: 0, // 显式 0
 	})
-	_, _ = svc.Feed(newHomeCtx().Request.Context())
+	_, _ = svc.Feed(newHomeCtx())
 	if fakeCache.setCalls.Load() != 0 {
 		t.Errorf("cache.Set called %d, want 0 (TTL=0 should skip backfill)", fakeCache.setCalls.Load())
 	}
@@ -300,7 +300,7 @@ func TestFeed_HappyPath(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	feed, err := svc.Feed(newHomeCtx().Request.Context())
+	feed, err := svc.Feed(newHomeCtx())
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestFeed_EmptyResults(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	feed, err := svc.Feed(newHomeCtx().Request.Context())
+	feed, err := svc.Feed(newHomeCtx())
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestFeed_BlindBoxSearchError(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, err := svc.Feed(newHomeCtx().Request.Context())
+	_, err := svc.Feed(newHomeCtx())
 	if err == nil {
 		t.Fatalf("Feed err = nil, want error")
 	}
@@ -394,7 +394,7 @@ func TestFeed_SupplierSearchError(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, err := svc.Feed(newHomeCtx().Request.Context())
+	_, err := svc.Feed(newHomeCtx())
 	if err == nil {
 		t.Fatalf("Feed err = nil, want error")
 	}
@@ -422,7 +422,7 @@ func TestFeed_BadJSON_ReturnsUnavailable(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, err := svc.Feed(newHomeCtx().Request.Context())
+	_, err := svc.Feed(newHomeCtx())
 	if err == nil {
 		t.Fatalf("Feed err = nil, want error on bad JSON")
 	}
@@ -439,7 +439,7 @@ func TestFeed_UsesCorrectIndexNames(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, _ = svc.Feed(newHomeCtx().Request.Context())
+	_, _ = svc.Feed(newHomeCtx())
 
 	if len(fake.searchCalls) != 2 {
 		t.Fatalf("searchCalls = %v, want 2", fake.searchCalls)
@@ -468,7 +468,7 @@ func TestFeed_BlindBoxQueryFiltersSellingLifecycle(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, _ = svc.Feed(newHomeCtx().Request.Context())
+	_, _ = svc.Feed(newHomeCtx())
 
 	if len(bbQuery) == 0 {
 		t.Fatal("blind box query not captured")
@@ -495,7 +495,7 @@ func TestFeed_QueriesContainCorrectSort(t *testing.T) {
 		},
 	}
 	svc := newFeedSvc(fake)
-	_, _ = svc.Feed(newHomeCtx().Request.Context())
+	_, _ = svc.Feed(newHomeCtx())
 
 	// 盲盒 sort: hot_score desc, created_at desc
 	for _, want := range []string{`"hot_score": "desc"`, `"created_at": "desc"`} {
