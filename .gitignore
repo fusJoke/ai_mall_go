@@ -60,3 +60,9 @@ desktop.ini
 /login-error.png
 # GUI 黑盒测试证据截图（本地留存，不入库）
 /gui-test-screenshots/
+
+# ===== 本地联调残留（补充）=====
+# web dev server 后台启动时的输出重定向文件
+/web/*.log
+# ZCode 编辑器自动生成/同步的忽略文件（该工具自行维护，不入库）
+/.zcodeignore
