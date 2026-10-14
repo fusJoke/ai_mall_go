@@ -142,10 +142,26 @@ func collectConfigFiles(entries []os.DirEntry) []string {
 	return names
 }
 
+// LogConfig 日志初始化配置（internal/infra/log 消费）。
+//
+// mode: "console"（dev，人读文本写 stderr）| "json"（prod，写 file 或 stderr）；
+// slow_query_ms 是 GORM 慢查询阈值，由 database 包读取（日志关注点故放此处）。
+type LogConfig struct {
+	Mode        string `mapstructure:"mode"`
+	Level       string `mapstructure:"level"`
+	File        string `mapstructure:"file"`
+	MaxSizeMB   int    `mapstructure:"max_size_mb"`
+	MaxBackups  int    `mapstructure:"max_backups"`
+	MaxAgeDays  int    `mapstructure:"max_age_days"`
+	Compress    bool   `mapstructure:"compress"`
+	SlowQueryMS int    `mapstructure:"slow_query_ms"`
+}
+
 // Config 是配置文件的强类型映射。
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
+	Log      LogConfig      `mapstructure:"log"`
 	Token    TokenConfig    `mapstructure:"token"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	Captcha  CaptchaConfig  `mapstructure:"captcha"`
@@ -394,6 +410,18 @@ func (c *Config) applyDefaults() {
 	// 显式设 server.mode: dev 才会暴露，避免任何"忘设环境变量"导致意外开放。
 	if c.Server.Mode == "" {
 		c.Server.Mode = "release"
+	}
+
+	// Log 默认值：console 文本写 stderr（开发态友好）；生产在 .env.yaml
+	// 覆盖 log.mode: json + log.file: logs/serve.log。slow_query_ms 兜底 200ms。
+	if c.Log.Mode == "" {
+		c.Log.Mode = "console"
+	}
+	if c.Log.Level == "" {
+		c.Log.Level = "info"
+	}
+	if c.Log.SlowQueryMS == 0 {
+		c.Log.SlowQueryMS = 200
 	}
 	// CaptchaConfig 不做兜底：所有字段必须由 captcha.yaml 显式提供。
 	// 缺失字段由使用方（infra/captcha）做语义级校验并返回 ErrInvalidInput。

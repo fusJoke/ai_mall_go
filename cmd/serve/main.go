@@ -2,12 +2,13 @@
 //
 // 启动流程：
 //  1. 从项目根目录加载 config/*.yaml 与 .env.yaml
-//  2. 初始化数据库（GORM + dbresolver）
-//  3. 初始化基础设施：token / upload / cache / mq / search / channel（均 fail fast）
-//  4. 注册 gin 路由（含 /healthz 与 /api/v1/ping 测试路由）
-//  5. dev 模式额外挂载 /swagger/*any（cfg.Server.Mode == "dev" 时启用；
+//  2. 初始化结构化日志（internal/infra/log：slog 前端 + 可插拔引擎）
+//  3. 初始化数据库（GORM + dbresolver，SQL 日志接入 slog）
+//  4. 初始化基础设施：token / upload / cache / mq / search / channel（均 fail fast）
+//  5. 注册 gin 路由（含 /healthz 与 /api/v1/ping 测试路由）
+//  6. dev 模式额外挂载 /swagger/*any（cfg.Server.Mode == "dev" 时启用；
 //     默认 release，生产 binary 不挂载 API 文档，避免忘设环境变量导致意外开放）
-//  6. 监听 SIGINT / SIGTERM，触发优雅关闭
+//  7. 监听 SIGINT / SIGTERM，触发优雅关闭
 //
 // 后续接入 internal/router 与 internal/handler 后，
 // newRouter 会被替换为路由自动发现逻辑。
@@ -23,7 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	stdlog "log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -42,6 +43,7 @@ import (
 	"ai-go-mall/internal/infra/channel"
 	"ai-go-mall/internal/infra/config"
 	"ai-go-mall/internal/infra/database"
+	"ai-go-mall/internal/infra/log"
 	"ai-go-mall/internal/infra/migrate"
 	"ai-go-mall/internal/infra/mq"
 	"ai-go-mall/internal/infra/search"
@@ -68,34 +70,48 @@ var migrationsDir = "cmd/migrate/migrations"
 
 func main() {
 	if err := config.Init("."); err != nil {
-		log.Fatalf("init config: %v", err)
+		stdlog.Fatalf("init config: %v", err)
 	}
+
+	// 日志初始化：config 就绪后、一切组件之前；log.Init 自身不产生错误。
+	// 启动期 fail fast（下方 stdlog.Fatalf）保留标准库 log —— 语义同 PHP die。
+	lc := config.Get().Log
+	log.Init(log.Config{
+		Mode:       lc.Mode,
+		Level:      lc.Level,
+		File:       lc.File,
+		MaxSizeMB:  lc.MaxSizeMB,
+		MaxBackups: lc.MaxBackups,
+		MaxAgeDays: lc.MaxAgeDays,
+		Compress:   lc.Compress,
+	})
+
 	if err := database.Init(); err != nil {
-		log.Fatalf("init database: %v", err)
+		stdlog.Fatalf("init database: %v", err)
 	}
 	if err := runMigrations(config.Get().Database); err != nil {
-		log.Fatalf("init migrations: %v", err)
+		stdlog.Fatalf("init migrations: %v", err)
 	}
 	if err := token.Init(); err != nil {
-		log.Fatalf("init token: %v", err)
+		stdlog.Fatalf("init token: %v", err)
 	}
 	if err := upload.Init(); err != nil {
-		log.Fatalf("init upload: %v", err)
+		stdlog.Fatalf("init upload: %v", err)
 	}
 	if err := cache.Init(); err != nil {
-		log.Fatalf("init cache: %v", err)
+		stdlog.Fatalf("init cache: %v", err)
 	}
 	if err := hotspot.Init(); err != nil {
-		log.Fatalf("init hotspot: %v", err)
+		stdlog.Fatalf("init hotspot: %v", err)
 	}
 	if err := mq.Init(); err != nil {
-		log.Fatalf("init mq: %v", err)
+		stdlog.Fatalf("init mq: %v", err)
 	}
 	if err := search.Init(); err != nil {
-		log.Fatalf("init search: %v", err)
+		stdlog.Fatalf("init search: %v", err)
 	}
 	if err := channel.Init(); err != nil {
-		log.Fatalf("init channel: %v", err)
+		stdlog.Fatalf("init channel: %v", err)
 	}
 	cfg := config.Get()
 
@@ -110,7 +126,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("%s listening on %s", cfg.Server.Name, srv.Addr)
+		log.L().Info("listening", "server", cfg.Server.Name, "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
@@ -121,16 +137,16 @@ func main() {
 	select {
 	case err := <-errCh:
 		if err != nil {
-			log.Fatalf("server error: %v", err)
+			stdlog.Fatalf("server error: %v", err)
 		}
 	case <-ctx.Done():
-		log.Printf("shutdown signal received")
+		log.L().Info("shutdown signal received")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown failed: %v", err)
+		log.L().Warn("graceful shutdown failed", "err", err.Error())
 	}
 }
 
@@ -162,9 +178,10 @@ func runMigrations(cfg config.DatabaseConfig) error {
 // 单测不传以避免对全局 *gorm.DB 的依赖）。
 func newRouter(serverName string, devMode bool, extraMW ...gin.HandlerFunc) http.Handler {
 	r := gin.New()
-	// 中间件顺序：Logger / Recovery 兜底 → CORS 处理跨域 → DB 中间件接入 *gorm.DB → 业务路由。
+	// 中间件顺序：RequestLogger / Recovery 兜底 → CORS 处理跨域 → DB 中间件接入 *gorm.DB → 业务路由。
+	// RequestLogger 注入 trace_id 并打访问日志（internal/middleware/logging.go）；
 	// CORS 插在 DB 之前：OPTIONS 预检无需 DB 上下文，且业务路由前 CORS 头已就绪。
-	mw := []gin.HandlerFunc{gin.Logger(), gin.Recovery(), middleware.CORS()}
+	mw := []gin.HandlerFunc{middleware.RequestLogger(), middleware.Recovery(), middleware.CORS()}
 	mw = append(mw, extraMW...)
 	r.Use(mw...)
 

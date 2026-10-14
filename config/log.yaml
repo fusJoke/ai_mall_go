@@ -1,0 +1,17 @@
+# 日志配置（消费方 internal/infra/log；GORM 慢查询阈值由 internal/infra/database 读取）
+#
+# mode:
+#   console - 人读文本，写 stderr（开发态默认）
+#   json    - 结构化 JSON，供采集；生产在 .env.yaml 覆盖：
+#               log:
+#                 mode: json
+#                 file: logs/serve.log
+log:
+  mode: console
+  level: info
+  file: ""            # json 模式的输出文件；空 = stderr
+  max_size_mb: 100    # 单文件上限（MB）
+  max_backups: 7      # 保留旧文件数
+  max_age_days: 28    # 保留天数
+  compress: true      # 归档 gzip
+  slow_query_ms: 200  # GORM 慢查询阈值（毫秒）

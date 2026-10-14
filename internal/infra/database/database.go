@@ -23,6 +23,7 @@ import (
 	"gorm.io/plugin/dbresolver"
 
 	"ai-go-mall/internal/infra/config"
+	"ai-go-mall/internal/infra/log"
 )
 
 // CtxKey 是 gin.Context 中存储请求作用域 *gorm.DB 的 key。
@@ -117,6 +118,10 @@ func openWrite(dbCfg config.DatabaseConfig) (*gorm.DB, error) {
 			TablePrefix:   dbCfg.Prefix,
 			SingularTable: true,
 		},
+		// SQL 日志统一接入 slog（internal/infra/log/gorm.go）：
+		// ErrRecordNotFound 静默、慢查询 Warn、Debug 级打全量 SQL；
+		// Trace 携带请求 ctx 的 trace_id，SQL 日志自动与请求关联。
+		Logger: log.NewGormLogger(slowQueryThreshold()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open write database: %w", err)
@@ -126,6 +131,15 @@ func openWrite(dbCfg config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("configure write pool: %w", err)
 	}
 	return opened, nil
+}
+
+// slowQueryThreshold 从日志配置取 GORM 慢查询阈值；config 未初始化（单测场景）
+// 时回落 200ms。
+func slowQueryThreshold() time.Duration {
+	if c := config.Get(); c != nil && c.Log.SlowQueryMS > 0 {
+		return time.Duration(c.Log.SlowQueryMS) * time.Millisecond
+	}
+	return 200 * time.Millisecond
 }
 
 // registerReadReplica 通过 dbresolver 插件为已打开的 GORM 实例注册读副本。
