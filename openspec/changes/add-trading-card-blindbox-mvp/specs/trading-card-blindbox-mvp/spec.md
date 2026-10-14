@@ -4,7 +4,7 @@
 
 球星卡盲盒商城 MVP 端到端商业模型：用户登录后从 ES 推荐 feed 浏览盲盒，进入详情查看卡池概率公示与限时特价，一键抽卡（事务内扣库存 + 扣余额 + 落订单 + 抽中卡片），查看订单历史；供应商自助注册后管理自家盲盒与活动；admin 后台管理供应商状态、盲盒状态与推荐位；引入 Redis 缓存详情/feed/限流，引入 Elasticsearch 提供首页推荐。
 
-## Requirements
+## ADDED Requirements
 
 ### Requirement: mall_users field schema
 
