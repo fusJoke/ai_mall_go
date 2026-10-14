@@ -44,6 +44,14 @@ func CORS() gin.HandlerFunc {
 			http.MethodOptions,
 		},
 		AllowHeaders: []string{"*"},
-		MaxAge:       24 * time.Hour,
+		// ExposeHeaders：跨域下浏览器默认只把 CORS 安全响应头交给前端 JS，
+		// 自定义排障 / 限流头必须显式暴露，否则 fetch / XHR 读不到：
+		//   - X-Feed-Source：首页 Feed 数据来源（es / mysql），排障与灰度观察
+		//     （常量定义见 internal/service/user 的 FeedSourceHeader）；
+		//   - Retry-After：限流 429 的重试等待秒数，抽卡按钮倒计时依赖它。
+		// 注意：这里不 import service 包，避免 middleware 反向依赖业务层，
+		// 故头名以字面量复刻，改动上游常量时需同步本处。
+		ExposeHeaders: []string{"X-Feed-Source", "Retry-After"},
+		MaxAge:        24 * time.Hour,
 	})
 }
