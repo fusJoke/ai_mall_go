@@ -53,81 +53,8 @@
 ```
 
 ## 结构特点
+1. 采用多入口设计（即 cmd 下面一个目录一个入口）
+2. 分层架构的调用关系（固定流向，永远不变）：`Handler > Service > Repository > Model`
 
-1. 采用多入口设计（即 cmd 下面一个目录一个入口），golang 的源码也是这样设计的
-2. 和部分比较知名项目略有不同的是，文件夹名称全部使用单数（包括 config 和 script）
-    - 首先是因为这是 Go 社区的命名惯例，比如 `vendor、test`，标准库也是清一色的单数命名
-    - 其次就是为了保持风格统一，特别是 `internal` 下面的 `handler、model、service` 都是单数形式；很多项目外层是复数形式的 `config`，内层是 `handler` 的单数形式。
-    - 以上命名方式都有自己的解释，但我认为最重要的还是 Go 社区给包命名的定义：**包名描述的是"这个包是什么"，而不是"这个包里装了什么"，所以应该使用单数。**
-3. 分层架构的调用关系（固定流向，永远不变）：`Handler > Service > Repository > Model`
-4. 结构并不完整，后续根据实际项目需求扩展
 
-## 核心结构选型背景
 
-目录结构，特别是 `internal` 下面的 `handler、model、service、model` 四层直接平铺经过很长时间的研究。
-
-首先是这种事情问 AI 太磨人了，不同的 AI 不同的答案，换个问法它自己还会修改观点，只能自己全面调研和研究...
-
-go 社区有很多种做法：
-
-#### 第一种：一个业务或者能力相关的都放在一个目录内（ddd），比如：
-
-```bash
-├── internal/
-│   ├── user/
-│   │   ├── handler
-│   │   ├── service
-│   │   ├── repository
-│   │   └── model
-│   └── order/
-│   │   ├── handler
-│   │   ├── service
-│   │   ├── repository
-│   │   └── model
-```
-
-这种方案目前不合适，项目前期单体架构即可，微服务架构是未来考虑的事，前期发展试错阶段业务增多，同级的能力也会极速增多，找文件夹都得翻页。
-
-#### 第二种：以 app 作为顶层，然后再以业务进行划分，比如：
-
-```bash
-├── internal/
-│   ├── app/
-│   │   └── admin
-│   │   │   ├── user/
-│   │   │   │   ├── handler
-│   │   │   │   ├── service
-│   │   │   │   ├── repository
-│   │   │   │   ├── model
-│   │   │   └── order/
-│   │   │   │   │   ├── handler
-│   │   │   │   │   ├── service
-│   │   │   │   │   ├── repository
-│   │   │   │   │   └── model
-```
-
-这种方案，由于 golang 中多了一层 `internal`，显得目录层级很深，而控制器、模型等又是经常改动的文件。
-
-#### 第三种：即现在的方案，internal 下平铺分层架构的目录，放弃 app 目录，比如：
-
-```bash
-├── internal/
-│   ├── handler/
-│   │   ├── user/
-│   │   │   ├── log.go
-│   │   │   ├── rule.go
-│   │   │   ├── ...
-│   │   │   └── group.go
-│   ├── model/
-│   ├── repository/
-│   └── service/
-```
-
-放弃 app 目录，直接就让层级 - 2 （去掉 app/admin），新的结构到了 handler、model 以内：你想分的粗一点，就是 common、user、admin，而想分的细一点，可以是 group、log、rule、config、article、fields 等。
-
-#### 其他
-
--   也有看到 `Go` 的 `internal` 机制出来之前的项目，这类项目将业务代码放在 `internal` 之外，可能被外部引用。
--   也有看到明显是从其它语言带过来的方案，`biz 存放业务逻辑层，dal 存放数据访问层，schema 存放数据模型层`
--   自带 API 分版本的方案 `api > v1 > system`，我们的项目之所以不分版本，是因为当你需要文件夹层面分版本时，再去新建文件夹，复制过去修改即可，开源系统本身不带这个。
--   `app > admin > models + apis + service` 的方案

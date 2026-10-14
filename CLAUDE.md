@@ -2,6 +2,26 @@
 
 Guidance for Claude Code in this repository.
 
+## 代码探查：优先用 CodeGraph，不要先 Read（强制）
+
+本项目已建 CodeGraph 索引（仓库根有 `.codegraph/`）。**探查代码时按下面的顺序，不要一上来就 Read 文件或 grep：**
+
+1. **首选 `codegraph_explore`**（MCP 工具，一次调用返回相关符号的逐行源码 + 符号间调用链 + 影响面）。适用：任何"这段逻辑在哪/怎么实现/谁调用了它/我要改的地方会波及什么"的问题，或**动手改代码之前**。
+2. MCP 工具不可用时，退回 shell：`codegraph explore "<符号名或英文关键词>"`，输出完全等价。
+3. **只有在以下情况才用 Read/Grep/Glob**：CodeGraph 查不到、你需要读配置文件 / SQL 迁移 / yaml / md 等非代码文件、或要看 `.codegraph/` 未覆盖的内容。此时应直接说明"CodeGraph 未覆盖，改用 Read"。
+
+**关键：查询词用英文符号名或英文代码词，不要用中文自然语言。** CodeGraph 走词法匹配（FTS + 符号名），中文 prompt 基本零命中。反例与正例：
+
+| ✗ 无效（中文 → 零命中） | ✓ 有效（英文符号名 → 命中） |
+| --- | --- |
+| 批次账单的确认逻辑是怎么实现的 | `BillService Confirm` |
+| 抽卡事务在哪里扣减库存 | `DrawOrder deduct stock transaction` |
+| 商品售罄后触发什么 | `GenerateForBox sold out lifecycle` |
+
+不确定确切符号名时，先用 `codegraph query <英文关键词>` 找符号，再 `codegraph explore`。
+
+**关于 `UserPromptSubmit` hook**：每次提问会自动注入 `<codegraph_context>`。它是**词法**检索——你的 prompt 若是中文，注入块大概率是空转（"No relevant code found"）。这不是出错，而是提示你：**要么用英文符号名提问，要么忽略该空块、自己主动调 `codegraph_explore`**。不要把空转的注入块当成"CodeGraph 不可用"。
+
 ## 项目状态
 
 Go 电商 mall 项目，`module ai-go-mall`，Go 1.27.1。已落地：
@@ -66,6 +86,3 @@ KEY `idx_<表名>_deleted_at` (`deleted_at`)
 - 时间戳统一 `datetime(3)`。
 - `deleted_at` 必须建索引。
 
-## 参考
-
-不确定时对照：`doc/Golang 项目目录结构.md`（分层选型背景、internal 内层按模块分目录）、`doc/Golang 编码风格最佳实践.md`（编码速查表）。
