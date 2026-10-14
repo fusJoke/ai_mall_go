@@ -88,8 +88,8 @@ type batchTestEnv struct {
 	userID     int64
 	cardID     int64
 
-	drawSvc   user.DrawService
-	billSvc   mallSvc.BillService
+	drawSvc    user.DrawService
+	billSvc    mallSvc.BillService
 	supBillSvc supplierSvc.BillService
 }
 
@@ -162,18 +162,18 @@ func portFromAddr(addr string) int {
 	return 3306
 }
 
-// batchMakeDSN 用 cfg + dbnameOverride 拼 DSN。
-func batchMakeDSN(cfg config.DatabaseConfig, dbnameOverride string) string {
-	name := cfg.Write.DBName
-	if dbnameOverride != "" {
-		name = dbnameOverride
-	}
+// batchMakeDSN 拼 DSN。dbname 直接采用传入值，**不做 cfg 兜底**：
+// 传空串表示「不指定库」，这是 bootstrap 阶段必需的 —— 它要连上 MySQL 去
+// DROP/CREATE 目标库，而目标库可能尚不存在（上一轮跑完可能已被 DROP）。
+// 若像 admin 版 makeDSN 那样在空串时回退到 cfg.Write.DBName，DSN 会带上一个
+// 不存在的库名，连接直接 Error 1049 Unknown database。
+func batchMakeDSN(cfg config.DatabaseConfig, dbname string) string {
 	mc := mysqldriver.NewConfig()
 	mc.User = cfg.Write.Username
 	mc.Passwd = cfg.Write.Password
 	mc.Net = "tcp"
 	mc.Addr = fmt.Sprintf("%s:%d", cfg.Write.Host, cfg.Write.Port)
-	mc.DBName = name
+	mc.DBName = dbname
 	mc.ParseTime = true
 	mc.Loc = time.Local
 	mc.Params = map[string]string{"charset": "utf8mb4"}
@@ -204,7 +204,10 @@ func NewBatchTestEnv(t *testing.T) *batchTestEnv {
 		t.Fatalf("open bootstrap mysql: %v", err)
 	}
 	t.Cleanup(func() { _ = bootstrap.Close() })
-	ctx, cancelFn := context.WithTimeout(context.Background(), 10*time.Second)
+	// DROP/CREATE 用独立的 60s 超时。原先照搬 admin 集成测试的 10s，实测不够：
+	// 三个用例共用同一库名，每个用例 Setup 都要先 DROP 上一个用例留下的整库，
+	// 在 Docker Desktop on Windows 的卷 IO 下曾直接 `context deadline exceeded`。
+	ctx, cancelFn := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancelFn()
 	if _, err := bootstrap.ExecContext(ctx,
 		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", cfg.Write.DBName)); err != nil {
@@ -393,7 +396,7 @@ func TestBatchBillIntegration_SoldOutToPaid(t *testing.T) {
 	env := NewBatchTestEnv(t)
 	ctx := env.Ctx()
 
-	const draws = 5         // == 池内 stock，抽满即售罄
+	const draws = 5 // == 池内 stock，抽满即售罄
 	const pricePerDraw = 1000.00
 
 	// ---- 1. 连续抽卡至售罄 ----
@@ -424,8 +427,10 @@ func TestBatchBillIntegration_SoldOutToPaid(t *testing.T) {
 	if bill.Status != mall.BillStatusGenerated {
 		t.Errorf("new bill status = %q, want %q", bill.Status, mall.BillStatusGenerated)
 	}
-	if bill.Version != 0 {
-		t.Errorf("new bill version = %d, want 0", bill.Version)
+	// version 是 1-based：DDL 为 `version int NOT NULL DEFAULT 1`，模型注释亦为
+	// 「rejected重核后+1」。首次生成即 1，不要按数组下标的习惯写成 0。
+	if bill.Version != 1 {
+		t.Errorf("new bill version = %d, want 1", bill.Version)
 	}
 	if bill.CommissionRate != 0.10 {
 		t.Errorf("bill.CommissionRate = %v, want 0.10", bill.CommissionRate)
@@ -568,8 +573,9 @@ func TestBatchBillIntegration_RejectThenRegenerate(t *testing.T) {
 	if bill.Status != mall.BillStatusGenerated {
 		t.Errorf("after regenerate status = %q, want %q", bill.Status, mall.BillStatusGenerated)
 	}
-	if bill.Version != 1 {
-		t.Errorf("after regenerate version = %d, want 1", bill.Version)
+	// 首次生成 1 → 重核一次为 2（见上一条 version 断言的 1-based 说明）。
+	if bill.Version != 2 {
+		t.Errorf("after regenerate version = %d, want 2", bill.Version)
 	}
 	if bill.TotalAmount != newTotal {
 		t.Errorf("after regenerate total = %v, want %v", bill.TotalAmount, newTotal)
