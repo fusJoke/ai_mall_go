@@ -39,10 +39,24 @@ export function setAuth(token: string, user: UserInfo | null): void {
   if (user) setItem(STORAGE_KEYS.user, user)
 }
 
-/** 局部更新用户信息（如「我的」页刷新余额）。 */
+/** 局部更新用户信息（如「我的」页刷新余额）。无既有快照时以本次数据建档。 */
 export function patchUser(partial: Partial<UserInfo>): void {
-  if (!state.user) return
-  state.user = { ...state.user, ...partial }
+  if (state.user) {
+    state.user = { ...state.user, ...partial }
+  } else {
+    // 仅有 token 而无用户快照的场景（如联调时只注入 `VITE_DEV_TOKEN`、未种用户缓存）：
+    // 不能丢弃刚拉到的真实 profile，否则「我的」页会一直显示「未登录 / ¥0.00」。
+    // id 缺失说明 partial 不足以构成有效档案，维持忽略。
+    if (partial.id === undefined) return
+    state.user = {
+      id: partial.id,
+      username: partial.username ?? '',
+      nickname: partial.nickname ?? '',
+      avatar: partial.avatar ?? '',
+      balance: partial.balance ?? '0.00',
+      status: partial.status ?? 1,
+    }
+  }
   setItem(STORAGE_KEYS.user, state.user)
 }
 
