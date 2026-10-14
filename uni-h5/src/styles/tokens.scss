@@ -1,0 +1,79 @@
+/**
+ * 设计令牌。
+ *
+ * 本文件是全项目**页面与组件样式**中唯一允许出现十六进制色值的地方
+ * （`common.scss` 里的阴影/透明叠加除外，它们引用变量后由 sass 求值）。
+ *
+ * 已知例外（均为平台强制，且不涉及稀有度配色）：
+ * - `src/mock/slider.ts`：滑块图是内联 SVG 经 data URI 嵌入，SVG 在隔离上下文
+ *   渲染，无法解析文档的 CSS 自定义属性；
+ * - `src/pages.json`：tabBar 颜色由 uni-app 构建期 JSON 消费，JSON 无法引用 CSS 变量。
+ *
+ * 用法约定：
+ * - 组件与页面一律使用 `var(--xxx)`（CSS 自定义属性），**不要**在
+ *   `<style scoped>` 中 `@import` 本文件 —— 全局 `:root` 块被 scoped 化后不会生效。
+ * - 只有 `common.scss` 允许 `@import` 本文件。
+ */
+
+/* ===== SCSS 变量（供 common.scss 内部求值使用） ===== */
+
+$color-bg: #0b0d12;
+$color-surface: #161a22;
+$color-surface-2: #1d222c;
+$color-border: #262d3a;
+$color-text: #e9ecf2;
+$color-muted: #8b94a6;
+$color-dim: #5d6678;
+$color-gold: #f5b544;
+$color-gold-2: #ffd479;
+$color-rarity-ssr: #ffd479;
+$color-rarity-sr: #b98cff;
+$color-rarity-r: #5aa9ff;
+$color-rarity-n: #8b94a6;
+$color-danger: #ff5c5c;
+$color-success: #4ecb8f;
+
+$radius-sm: 8rpx;
+$radius-md: 16rpx;
+$radius-lg: 24rpx;
+$radius-pill: 999rpx;
+
+$space-xs: 8rpx;
+$space-sm: 16rpx;
+$space-md: 24rpx;
+$space-lg: 32rpx;
+$space-xl: 48rpx;
+
+/* ===== CSS 自定义属性（全局，仅在 common.scss 中输出一次） ===== */
+
+:root {
+  --bg: #{$color-bg};
+  --surface: #{$color-surface};
+  --surface-2: #{$color-surface-2};
+  --border: #{$color-border};
+  --text: #{$color-text};
+  --muted: #{$color-muted};
+  --dim: #{$color-dim};
+  --gold: #{$color-gold};
+  --gold-2: #{$color-gold-2};
+
+  /* 稀有度四档：SSR / SR / R / N（与后端枚举一致） */
+  --ssr: #{$color-rarity-ssr};
+  --sr: #{$color-rarity-sr};
+  --r: #{$color-rarity-r};
+  --n: #{$color-rarity-n};
+
+  --danger: #{$color-danger};
+  --success: #{$color-success};
+
+  --radius-sm: #{$radius-sm};
+  --radius-md: #{$radius-md};
+  --radius-lg: #{$radius-lg};
+  --radius-pill: #{$radius-pill};
+
+  --space-xs: #{$space-xs};
+  --space-sm: #{$space-sm};
+  --space-md: #{$space-md};
+  --space-lg: #{$space-lg};
+  --space-xl: #{$space-xl};
+}

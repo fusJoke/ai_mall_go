@@ -1,0 +1,14 @@
+node_modules/
+dist/
+unpackage/
+.DS_Store
+*.local
+.env.local
+.env.*.local
+
+# playwright-cli 的会话快照 / 截图 / 控制台日志（本地联调产物，不入库）
+.playwright-cli/
+
+# playwright-cli 的 aria 快照与整页截图（联调临时产物，文件名固定故逐个列出）
+/home.yaml
+/home-real.png

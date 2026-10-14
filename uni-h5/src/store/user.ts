@@ -1,0 +1,59 @@
+import { reactive } from 'vue'
+
+import { STORAGE_KEYS } from '@/config'
+import { getItem, removeItem, setItem } from '@/utils/storage'
+import type { UserInfo } from '@/types'
+
+interface AuthState {
+  token: string
+  user: UserInfo | null
+  /**
+   * 会话是否降级为 mock-only（未配置真实令牌）。
+   * 此时需鉴权接口会返回 401，界面据此给出明确提示，而不是静默失败。
+   */
+  degraded: boolean
+}
+
+const state = reactive<AuthState>({
+  token: getItem<string>(STORAGE_KEYS.token, ''),
+  user: getItem<UserInfo | null>(STORAGE_KEYS.user, null),
+  degraded: false,
+})
+
+/** 只读视图；写入必须走下方 action。 */
+export const authState: Readonly<AuthState> = state
+
+export function getToken(): string {
+  return state.token
+}
+
+export function isLoggedIn(): boolean {
+  return !!state.token
+}
+
+export function setAuth(token: string, user: UserInfo | null): void {
+  state.token = token
+  state.user = user
+  state.degraded = false
+  setItem(STORAGE_KEYS.token, token)
+  if (user) setItem(STORAGE_KEYS.user, user)
+}
+
+/** 局部更新用户信息（如「我的」页刷新余额）。 */
+export function patchUser(partial: Partial<UserInfo>): void {
+  if (!state.user) return
+  state.user = { ...state.user, ...partial }
+  setItem(STORAGE_KEYS.user, state.user)
+}
+
+export function setDegraded(value: boolean): void {
+  state.degraded = value
+}
+
+export function clearAuth(): void {
+  state.token = ''
+  state.user = null
+  state.degraded = false
+  removeItem(STORAGE_KEYS.token)
+  removeItem(STORAGE_KEYS.user)
+}

@@ -1,0 +1,91 @@
+{
+  "pages": [
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationBarTitleText": "拆卡",
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#0b0d12",
+        "backgroundTextStyle": "light"
+      }
+    },
+    {
+      "path": "pages/blindbox/detail",
+      "style": {
+        "navigationBarTitleText": "商品详情",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/draw/result",
+      "style": {
+        "navigationBarTitleText": "开卡结果",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/orders/index",
+      "style": {
+        "navigationBarTitleText": "我的订单",
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#0b0d12",
+        "backgroundTextStyle": "light"
+      }
+    },
+    {
+      "path": "pages/orders/detail",
+      "style": {
+        "navigationBarTitleText": "订单详情",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationBarTitleText": "我的",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "登录",
+        "navigationStyle": "custom"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#8b94a6",
+    "selectedColor": "#f5b544",
+    "backgroundColor": "#161a22",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/orders/index",
+        "text": "订单",
+        "iconPath": "static/tabbar/orders.png",
+        "selectedIconPath": "static/tabbar/orders-active.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "static/tabbar/mine.png",
+        "selectedIconPath": "static/tabbar/mine-active.png"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "拆卡",
+    "navigationBarBackgroundColor": "#0b0d12",
+    "backgroundColor": "#0b0d12"
+  }
+}

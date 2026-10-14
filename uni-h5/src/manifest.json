@@ -1,0 +1,22 @@
+{
+  "name": "拆卡",
+  "appid": "",
+  "description": "ai-go-mall C 端移动客户端（uni-app H5）",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "h5": {
+    "title": "拆卡",
+    "router": {
+      "mode": "hash",
+      "base": "/"
+    },
+    "async": {
+      "loading": "AsyncLoading",
+      "error": "AsyncError",
+      "delay": 200,
+      "timeout": 60000
+    }
+  },
+  "vueVersion": "3"
+}
