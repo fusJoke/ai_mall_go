@@ -185,8 +185,21 @@ func runConsumer(ctx context.Context, m *mq.Manager, db *gorm.DB, consumerGroup 
 			return err // 不 ack：留给下次重试
 		}
 		if rows == 0 {
-			// 已 synced (幂等)：silent ack。
-			log.Printf("stock-sync: log id=%d already synced", p.ID)
+			// 0 行有两种含义，必须区分 —— 否则生产端的 ID 传错会被当成「幂等 ack」永久掩盖：
+			//   1) 该行已同步（正常幂等重投，常见于 MQ at-least-once）；
+			//   2) 该 ID 在 mall_stock_deduction_logs 里根本不存在（生产端 bug：
+			//      历史上 draw.go 误传 mall_draw_orders.id，两套自增序列必然对不上）。
+			// 历史版本对两种情况都只打 "already synced"，让该缺陷静默存活到对账日（OCR 审查 P1-3）。
+			exists, probeErr := deductionLogExists(db, p.ID)
+			switch {
+			case probeErr != nil:
+				log.Printf("stock-sync: probe log id=%d existence failed: %v (will retry via pending)", p.ID, probeErr)
+				return probeErr // 不 ack：探测失败时宁可重试，也不要盲目 ack
+			case !exists:
+				log.Printf("stock-sync: WARN log id=%d NOT FOUND in mall_stock_deduction_logs - producer likely published a wrong id", p.ID)
+			default:
+				log.Printf("stock-sync: log id=%d already synced", p.ID)
+			}
 		} else {
 			log.Printf("stock-sync: log id=%d marked synced", p.ID)
 		}
@@ -265,6 +278,19 @@ func markDeductionLogSynced(db *gorm.DB, logID int64, syncedAt time.Time) (int64
 		Where("id = ? AND synced_to_pool_at IS NULL", logID).
 		Update("synced_to_pool_at", syncedAt)
 	return res.RowsAffected, res.Error
+}
+
+// deductionLogExists 判断扣减日志行是否存在（不论是否已同步）。
+//
+// 用途：markDeductionLogSynced 返回 0 行时区分「已同步（幂等）」与「ID 不存在（生产端 bug）」。
+// 后者静默 ack 会掩盖缺陷，让 MQ 路径长期空转而对账日才发现（OCR 审查 P1-3）。
+func deductionLogExists(db *gorm.DB, logID int64) (bool, error) {
+	var n int64
+	err := db.
+		Model(&mall.MallStockDeductionLog{}).
+		Where("id = ?", logID).
+		Count(&n).Error
+	return n > 0, err
 }
 
 // listUnsyncedDeductionLogs 同上：worker 不走 gin 上下文。

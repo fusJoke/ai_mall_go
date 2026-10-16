@@ -72,8 +72,12 @@ const topicStockDeductionSync = "stock.deduction.sync"
 // stockDeductionPayload 是 MQ 消息体的 JSON 形态。
 //
 // cmd/stock-sync 端用同样的结构反序列化（参见 cmd/stock-sync/main.go）。
-// 这里只挑出对账必需的 LogID，避免序列化整个对象引入无关字段耦合
+// 这里只挑出对账必需的 **LogID**，避免序列化整个对象引入无关字段耦合
 // （如 CreatedAt、DeductedAt 与 synced 无关；snapshot_* 字段已经持久化）。
+//
+// 【P0】ID 必须是 mall_stock_deduction_logs.id（GORM Create 回填的主键），
+// **不是** mall_draw_orders.id —— 两者是两套独立自增序列，传错会让消费端
+// 更新 0 行并被当作「已同步」静默 ack，整条 MQ 路径空转为 0 收益（OCR 审查 P1-3）。
 type stockDeductionPayload struct {
 	ID int64 `json:"id"`
 }
@@ -742,6 +746,9 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 
 	// --- 4. MySQL 事务（d3 + stock_deduction_log + 结算副作用） ---
 	var result *DrawResult
+	// deductionLogID 由事务内的 InsertDeductionLog 回填，事务提交后供 MQ payload 使用。
+	// 在闭包外声明是为了让 goroutine 拿到已提交事务里的真实 LogID（见下文 P1-3 说明）。
+	var deductionLogID int64
 	txErr := s.txr.Run(c, func(txCtx *gin.Context) error {
 		// 4.a 校验盲盒 + 供应商 + 用户（防御性二次校验，防秒杀创建后被 admin 下架）。
 		bb, err := s.bb.GetByID(txCtx, sec.BlindBoxID)
@@ -899,6 +906,10 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 		if err := s.seckill.InsertDeductionLog(txCtx, log); err != nil {
 			return err
 		}
+		// GORM Create 回填主键 —— 这才是 cmd/stock-sync 要的 LogID。
+		// 切勿用 order.ID 代替：mall_draw_orders.id 与 mall_stock_deduction_logs.id
+		// 是两套独立自增序列，用订单 ID 去 UPDATE 扣减日志表必然 0 行（OCR 审查 P1-3）。
+		deductionLogID = log.ID
 
 		result = &DrawResult{
 			OrderID:     order.ID,
@@ -927,7 +938,10 @@ func (s *baseSeckillService) DrawSeckill(c *gin.Context, userID, seckillID int64
 	// payload 只含 LogID（cmd/stock-sync 端只需 ID 即可走 MarkDeductionLogSynced）。
 	if s.publisher != nil {
 		go func() {
-			payload, err := json.Marshal(stockDeductionPayload{ID: result.OrderID})
+			// ID 用 deductionLogID（InsertDeductionLog 回填的日志主键），
+			// 与上面注释一致。历史实现误传 result.OrderID，导致消费端
+			// UPDATE 0 行后静默 ack —— MQ 路径 100% 空转（OCR 审查 P1-3）。
+			payload, err := json.Marshal(stockDeductionPayload{ID: deductionLogID})
 			if err != nil {
 				log.Printf("user.draw: marshal stock deduction payload failed: %v", err)
 				return
