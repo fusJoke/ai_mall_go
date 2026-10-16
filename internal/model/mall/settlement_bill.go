@@ -44,7 +44,17 @@ type MallSettlementBill struct {
 	BlindBoxID int64 `json:"blind_box_id" gorm:"comment:商品ID(1商品1账单);not null;uniqueIndex:idx_mall_settlement_bills_blind_box"`
 
 	// SupplierID 供应商 ID（冗余，免 join）。
-	SupplierID int64 `json:"supplier_id" gorm:"comment:供应商ID(冗余);not null;uniqueIndex:idx_mall_settlement_bills_supplier_status,priority:1"`
+	//
+	// 索引 `idx_mall_settlement_bills_supplier_status` 是**普通索引**（supplier_id, status,
+	// created_at）—— 供应商账单中心按状态 tab 查列表用。
+	//
+	// 【为什么不是唯一索引】业务唯一键是 blind_box_id（1 商品 1 账单）。同一供应商
+	// 在同一状态下必然同时存在多张账单（多个商品各自 generated），(supplier_id, status)
+	// 唯一在业务上根本不成立。此前的 `uniqueIndex:` 标签与迁移 DDL（000015 里的普通 KEY）
+	// 相矛盾，属 schema 漂移：由于 AutoMigrate 已停用，它不会改表也不会报错，
+	// 但会持续误导读者以为存在这条约束（OCR 审查 P2-1）。
+	// 现已与迁移对齐，并由 schema_migration_consistency_test.go 锁定不再漂移。
+	SupplierID int64 `json:"supplier_id" gorm:"comment:供应商ID(冗余);not null;index:idx_mall_settlement_bills_supplier_status,priority:1"`
 
 	// TotalAmount 本批总 GMV（元）= 该商品全部 drawn 订单金额之和。
 	TotalAmount float64 `json:"total_amount" gorm:"comment:本批总GMV(元);type:decimal(14,2);not null;default:0"`
@@ -59,7 +69,10 @@ type MallSettlementBill struct {
 	PayoutAmount float64 `json:"payout_amount" gorm:"comment:应打款额(元);type:decimal(14,2);not null;default:0"`
 
 	// Status 状态：MallSettlementBillStatus*。
-	Status MallSettlementBillStatus `json:"status" gorm:"comment:状态(generated/confirmed/rejected/failed/paid);size:16;default:'generated';not null;uniqueIndex:idx_mall_settlement_bills_supplier_status,priority:2;index:idx_mall_settlement_bills_status_created,priority:1"`
+	//
+	// 参与两个普通索引：供应商侧的 (supplier_id, status, created_at) 与
+	// admin 后台的 (status, created_at)。两者都是非唯一（见 SupplierID 的说明）。
+	Status MallSettlementBillStatus `json:"status" gorm:"comment:状态(generated/confirmed/rejected/failed/paid);size:16;default:'generated';not null;index:idx_mall_settlement_bills_supplier_status,priority:2;index:idx_mall_settlement_bills_status_created,priority:1"`
 
 	// RejectReason 驳回原因（供应商驳回时必填）。
 	RejectReason string `json:"reject_reason" gorm:"comment:驳回原因(供应商驳回时必填);size:500;not null;default:''"`
@@ -80,10 +93,10 @@ type MallSettlementBill struct {
 	Remark string `json:"remark" gorm:"comment:备注(admin重核说明等);size:500"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime;index:idx_mall_settlement_bills_supplier_status,priority:3"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
-	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime;index:idx_mall_settlement_bills_status_created,priority:2;index:idx_mall_settlement_bills_supplier_status,priority:4"`
+	// CreatedAt 创建时间（GORM 自动维护）。同时是两个列表索引的末列。
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime;index:idx_mall_settlement_bills_status_created,priority:2;index:idx_mall_settlement_bills_supplier_status,priority:3"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index:idx_mall_settlement_bills_deleted_at"`
