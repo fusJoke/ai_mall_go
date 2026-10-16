@@ -13,6 +13,7 @@ package user
 
 import (
 	"errors"
+	"math"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,31 @@ import (
 	"ai-go-mall/internal/model"
 	"ai-go-mall/internal/repository"
 )
+
+var (
+	// errInvalidDecrementAmount / errInvalidIncrementAmount 是入口守卫的哨兵错误。
+	//
+	// 它们标记的是**编程错误**（调用方传了 0 / 负数 / NaN / ±Inf），不是可分支的业务状态，
+	// 因此不导出、也不与 ErrInsufficientBalance / ErrUserNotFound 并列。
+	//
+	// 用哨兵而非裸 errors.New 的理由是可测性：调用方拿到任何 error 都算"失败了"，
+	// 但测试需要区分「被守卫拒绝」和「守卫失效、SQL 真跑出去后失败」——
+	// 前者用 errors.Is 精确锁定，后者拿不到这两个哨兵，测试就会红。
+	errInvalidDecrementAmount = errors.New("user: decrement amount must be a positive finite number")
+	errInvalidIncrementAmount = errors.New("user: increment amount must be a positive finite number")
+)
+
+// validAmount 判定金额入参可用：既要是正数，也要是有限值（非 NaN / ±Inf）。
+//
+// 为什么不是 `amount <= 0`：NaN 与任何数比较恒为 false，`NaN <= 0` 因此也恒为 false，
+// 旧写法会让 NaN **穿过守卫**直达 SQL。写 `amount > 0` 让 NaN 落到「不满足 >0」一侧
+// 被拦下，同时一并覆盖 0 与负数；`±Inf` 由 math.IsInf 单独拦（Inf > 0 为 true）。
+//
+// 纵深防御说明：`users.balance` 是 decimal(12,2)，MySQL 本就会拒绝 NaN 并报错，
+// 所以这是「把错误提前到入口、给出确定性的 Go 侧错误」而非修复静默写坏。
+func validAmount(amount float64) bool {
+	return amount > 0 && !math.IsInf(amount, 0)
+}
 
 // UserRepository 定义 C 端会员的数据访问接口。
 //
@@ -126,8 +152,8 @@ func (r *gormUserRepository) GetByUsername(c *gin.Context, username string) (*mo
 //
 // 注：deleted_at IS NULL 由 GORM 自动加（Update / Where 触发软删过滤）。
 func (r *gormUserRepository) DecrementBalance(c *gin.Context, userID int64, amount float64) error {
-	if amount <= 0 {
-		return errors.New("user: decrement amount must be positive")
+	if !validAmount(amount) {
+		return errInvalidDecrementAmount
 	}
 	res := repository.DB(c).
 		Model(&model.User{}).
@@ -147,8 +173,8 @@ func (r *gormUserRepository) DecrementBalance(c *gin.Context, userID int64, amou
 // `balance = balance + ?` 走 gorm.Expr 表达式，让 DB 算；
 // 不带 balance >= 0 条件（additive 操作总是增加）。id 不存在 / 已软删均影响 0 行 → ErrUserNotFound。
 func (r *gormUserRepository) IncrementBalance(c *gin.Context, userID int64, amount float64) error {
-	if amount <= 0 {
-		return errors.New("user: increment amount must be positive")
+	if !validAmount(amount) {
+		return errInvalidIncrementAmount
 	}
 	res := repository.DB(c).
 		Model(&model.User{}).

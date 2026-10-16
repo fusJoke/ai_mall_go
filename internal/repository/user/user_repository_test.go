@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -147,18 +148,37 @@ func TestUserRepository_DecrementBalance_Insufficient(t *testing.T) {
 	}
 }
 
-// TestUserRepository_DecrementBalance_NonPositive 验证 amount<=0 短路。
-func TestUserRepository_DecrementBalance_NonPositive(t *testing.T) {
-	c, mock := newMockContext(t)
+// TestUserRepository_DecrementBalance_RejectsInvalidAmount 验证非法金额在入口被短路：
+// 0 / 负数 / NaN / ±Inf 都必须**由守卫**拒绝，而不是放行到 DB 后靠 DB 报错。
+//
+// 两个设计点：
+//  1. NaN 是这条测试存在的理由 —— `NaN <= 0` 恒为 false，旧的 `amount <= 0` 守卫拦不住它；
+//  2. 断言用 `errors.Is(err, errInvalidDecrementAmount)` 而非 `err != nil`。
+//     只断言"有错误"是**弱断言**：守卫一旦失效，SQL 会打到 sqlmock 上并因
+//     "call ... was not expected" 报错，测试会照样变绿，完全锁不住回归。
+func TestUserRepository_DecrementBalance_RejectsInvalidAmount(t *testing.T) {
+	cases := []struct {
+		name   string
+		amount float64
+	}{
+		{"zero", 0},
+		{"negative", -1},
+		{"NaN", math.NaN()},
+		{"positiveInf", math.Inf(1)},
+		{"negativeInf", math.Inf(-1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, mock := newMockContext(t)
 
-	if err := newTestRepository().DecrementBalance(c, 7, 0); err == nil {
-		t.Errorf("DecrementBalance(0) = nil, want err")
-	}
-	if err := newTestRepository().DecrementBalance(c, 7, -1); err == nil {
-		t.Errorf("DecrementBalance(-1) = nil, want err")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+			err := newTestRepository().DecrementBalance(c, 7, tc.amount)
+			if !errors.Is(err, errInvalidDecrementAmount) {
+				t.Errorf("DecrementBalance(%v) err = %v, want errInvalidDecrementAmount", tc.amount, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+			}
+		})
 	}
 }
 
@@ -203,18 +223,31 @@ func TestUserRepository_IncrementBalance_NotFound(t *testing.T) {
 	}
 }
 
-// TestUserRepository_IncrementBalance_NonPositive 验证 amount<=0 短路。
-func TestUserRepository_IncrementBalance_NonPositive(t *testing.T) {
-	c, mock := newMockContext(t)
+// TestUserRepository_IncrementBalance_RejectsInvalidAmount 同 DecrementBalance：
+// 非法金额必须由守卫拒绝（NaN / ±Inf 一并覆盖），断言同样走 errors.Is 而非 err != nil。
+func TestUserRepository_IncrementBalance_RejectsInvalidAmount(t *testing.T) {
+	cases := []struct {
+		name   string
+		amount float64
+	}{
+		{"zero", 0},
+		{"negative", -10},
+		{"NaN", math.NaN()},
+		{"positiveInf", math.Inf(1)},
+		{"negativeInf", math.Inf(-1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, mock := newMockContext(t)
 
-	if err := newTestRepository().IncrementBalance(c, 7, 0); err == nil {
-		t.Errorf("IncrementBalance(0) = nil, want err")
-	}
-	if err := newTestRepository().IncrementBalance(c, 7, -10); err == nil {
-		t.Errorf("IncrementBalance(-10) = nil, want err")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+			err := newTestRepository().IncrementBalance(c, 7, tc.amount)
+			if !errors.Is(err, errInvalidIncrementAmount) {
+				t.Errorf("IncrementBalance(%v) err = %v, want errInvalidIncrementAmount", tc.amount, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("mock expectations: %v (expected zero SQL calls)", err)
+			}
+		})
 	}
 }
 
@@ -307,7 +340,7 @@ func TestUserRepository_IncrementLoginFailure_NotFound(t *testing.T) {
 //	UPDATE `users` SET `login_failure`=login_failure + 1, `updated_at`=? WHERE ...
 //
 // 用 QueryMatcherRegexp 锁住「原子」语义不被未来 PR 改回覆写。
-// 关键断言：UPDATE SQL 必须出现 `` `login_failure`=login_failure + 1 `` 这个完整片段。
+// 关键断言：UPDATE SQL 必须出现 “ `login_failure`=login_failure + 1 “ 这个完整片段。
 func TestUserRepository_IncrementLoginFailure_UsesAtomicIncrement(t *testing.T) {
 	c, mock := newMockContext(t)
 
