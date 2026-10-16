@@ -8,8 +8,10 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -48,6 +50,10 @@ type ruleToggleStatusRequest struct {
 
 // ToggleStatus 处理 POST /admin/rule/toggle-status。
 //
+// 成功响应体含 `status`（切换后的值）—— spec（Admin can toggle a menu rule's
+// status）要求 success MUST contain the new status，前端据此就地更新行状态，
+// 不必为一次切换再拉一遍列表。`code` / `message` 保留以兼容既有调用方。
+//
 // 错误映射：gorm.ErrRecordNotFound → 404；其他 → 500。
 //
 // 不联动 token 吊销（规则不绑会话，design D2）。
@@ -58,7 +64,7 @@ type ruleToggleStatusRequest struct {
 // @Produce  json
 // @Security BearerAuth
 // @Param    req body admin.ruleToggleStatusRequest true "规则 ID"
-// @Success  200 {object} map[string]string "rule.toggle_status.ok"
+// @Success  200 {object} map[string]any "rule.toggle_status.ok（含 status）"
 // @Failure  400 {object} map[string]string "rule.toggle_status.invalid_input"
 // @Failure  404 {object} map[string]string "rule.toggle_status.not_found"
 // @Failure  500 {object} map[string]string "rule.toggle_status.internal"
@@ -72,7 +78,8 @@ func (h *RuleHandler) ToggleStatus(c *gin.Context) {
 		})
 		return
 	}
-	if err := h.svc.ToggleStatus(c, req.ID); err != nil {
+	newStatus, err := h.svc.ToggleStatus(c, req.ID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"code":    "rule.toggle_status.not_found",
@@ -86,7 +93,11 @@ func (h *RuleHandler) ToggleStatus(c *gin.Context) {
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": "rule.toggle_status.ok", "message": "ok"})
+	c.JSON(http.StatusOK, gin.H{
+		"code":    "rule.toggle_status.ok",
+		"message": "ok",
+		"status":  newStatus,
+	})
 }
 
 // batchDeleteRequest 是 POST /admin/rule/batch-delete 的请求体。
@@ -162,10 +173,11 @@ func (h *RuleHandler) ListAll(c *gin.Context) {
 // sentinel 错误，handler 在这里分门别类把它们映射成 400 + 具体错误码字符串，
 // 让前端可以做精细化提示。
 
-// Create 覆盖 BaseHandler.Create：处理 PID 业务错误。
+// Create 覆盖 BaseHandler.Create：输入校验 + PID 业务错误映射。
 //
-// service.Create 已经做 PID 校验（design D3）：PID 自指 / PID 是子孙 /
-// PID 不存在 → 业务 sentinel 错误；DB 异常 → 其他错误。
+// 校验顺序：先「字段/枚举合法性」，后「PID 业务约束」。spec 的
+// scenario「PID references non-existent rule」本身也带齐了 title / name，
+// 说明字段缺失时应当先报 invalid_input。
 //
 // @Summary  新建菜单规则
 // @Tags     rule
@@ -180,6 +192,13 @@ func (h *RuleHandler) ListAll(c *gin.Context) {
 func (h *RuleHandler) Create(c *gin.Context) {
 	var entity model.AdminRule
 	if err := c.ShouldBindJSON(&entity); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    "rule.create.invalid_input",
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := normalizeAndValidateCreate(&entity); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "rule.create.invalid_input",
 			"message": err.Error(),
@@ -207,6 +226,59 @@ func (h *RuleHandler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entity)
+}
+
+// normalizeAndValidateCreate 校验并归一化「新建菜单规则」的输入
+// （spec: Admin can create a new menu rule）。
+//
+// 必填：title / name 去除首尾空白后非空。
+// 枚举取值：
+//   - type ∈ {dir,menu,node}
+//   - open_type 为 nil 或 ∈ {tab,link,iframe}
+//   - extend ∈ {none,add_route_only,add_menu_only}
+//
+// 零值语义：Go 的 JSON 绑定无法区分「字段未传」与「显式传空串」，而
+// admin_rule 的 type / extend 在库里都有默认值（'menu' / 'none'）。
+// 因此空串按「未指定」处理、归一化成与 DB 默认值一致的值 —— 否则
+// 前端 create 只提交 8 个字段（不含 extend）就会被误判成非法枚举。
+// open_type 是 *AdminRuleOpenType，nil 本就表示「不适用」，保持 nil。
+func normalizeAndValidateCreate(e *model.AdminRule) error {
+	e.Title = strings.TrimSpace(e.Title)
+	e.Name = strings.TrimSpace(e.Name)
+	if e.Title == "" {
+		return errors.New("title is required")
+	}
+	if e.Name == "" {
+		return errors.New("name is required")
+	}
+
+	if e.Type == "" {
+		e.Type = model.RuleTypeMenu
+	}
+	switch e.Type {
+	case model.RuleTypeDir, model.RuleTypeMenu, model.RuleTypeNode:
+	default:
+		return fmt.Errorf("type must be one of dir/menu/node, got %q", string(e.Type))
+	}
+
+	if e.OpenType != nil {
+		switch *e.OpenType {
+		case model.RuleOpenTab, model.RuleOpenLink, model.RuleOpenIframe:
+		default:
+			return fmt.Errorf("open_type must be one of tab/link/iframe, got %q", string(*e.OpenType))
+		}
+	}
+
+	if e.Extend == "" {
+		e.Extend = model.RuleExtendNone
+	}
+	switch e.Extend {
+	case model.RuleExtendNone, model.RuleExtendAddRouteOnly, model.RuleExtendAddMenuOnly:
+	default:
+		return fmt.Errorf("extend must be one of none/add_route_only/add_menu_only, got %q", string(e.Extend))
+	}
+
+	return nil
 }
 
 // EditPost 覆盖 BaseHandler.EditPost：处理 PID 业务错误。

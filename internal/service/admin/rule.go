@@ -57,9 +57,15 @@ type RuleService interface {
 	// 检测 + visited 守护，最坏 O(visited set size) 次 SELECT。
 	ValidatePID(c *gin.Context, id, newPID uint) error
 
-	// ToggleStatus 切换 Status：1↔0。不联动 token 吊销（规则不绑会话，design D2）。
+	// ToggleStatus 切换 Status：1↔0，并返回**切换后**的值。不联动 token 吊销
+	// （规则不绑会话，design D2）。
+	//
+	// 返回新值而非只返回 error：spec（Admin can toggle a menu rule's status）
+	// 要求成功响应 MUST contain the new `status`，handler 需要拿到它才能回给
+	// 前端更新行状态，避免前端为了一次切换再发一次列表请求。
+	//
 	// 不存在 → gorm.ErrRecordNotFound。
-	ToggleStatus(c *gin.Context, id uint) error
+	ToggleStatus(c *gin.Context, id uint) (status int8, err error)
 
 	// BatchDelete 软删一组 id；删除前检查每个 id 是否有子规则，有则跳过（不删除），
 	// 计入 skipped；不存在的 id / 已软删的 id 也计入 skipped。
@@ -173,15 +179,15 @@ func (s *baseRuleService) Delete(c *gin.Context, id int64) error {
 
 // ToggleStatus 实现 RuleService.ToggleStatus（design D2）。
 //
-// 1→0 / 0→1 二选一；不联动 token（规则不绑会话）。
+// 1→0 / 0→1 二选一，返回切换后的值；不联动 token（规则不绑会话）。
 // 不存在 → gorm.ErrRecordNotFound 透传。
-func (s *baseRuleService) ToggleStatus(c *gin.Context, id uint) error {
+func (s *baseRuleService) ToggleStatus(c *gin.Context, id uint) (int8, error) {
 	current, err := s.repo.GetByID(c, id)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if current == nil {
-		return gorm.ErrRecordNotFound
+		return 0, gorm.ErrRecordNotFound
 	}
 
 	var newStatus int8
@@ -190,7 +196,10 @@ func (s *baseRuleService) ToggleStatus(c *gin.Context, id uint) error {
 	} else {
 		newStatus = 1
 	}
-	return s.repo.UpdateStatus(c, id, newStatus)
+	if err := s.repo.UpdateStatus(c, id, newStatus); err != nil {
+		return 0, err
+	}
+	return newStatus, nil
 }
 
 // BatchDelete 实现 RuleService.BatchDelete（design D2）。

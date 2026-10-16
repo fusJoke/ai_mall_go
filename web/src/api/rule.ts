@@ -53,6 +53,10 @@ export interface RuleListResponse {
 export interface RuleListParams {
     page?: number
     page_size?: number
+    /** 标题模糊匹配（子串、大小写不敏感）。空串由后端按「未传」处理。 */
+    title?: string
+    /** 名称模糊匹配（子串、大小写不敏感）。空串由后端按「未传」处理。 */
+    name?: string
 }
 
 /**
@@ -91,6 +95,13 @@ export interface RuleBatchDeleteBody {
 export interface RuleBatchDeleteResponse {
     deleted: number
     skipped: number
+}
+
+/** 启停响应：含切换后的 status（spec 要求 success MUST contain the new status）。 */
+export interface RuleToggleStatusResponse {
+    code: string
+    message: string
+    status: 0 | 1
 }
 
 // ============================================================================
@@ -169,10 +180,12 @@ export function ruleDelete(id: number) {
 /**
  * 切换启用状态。1↔0；不联动 token（规则不绑会话）。
  *
+ * 响应含切换后的 `status`，调用方可以就地更新行状态，不必再拉一遍列表。
+ *
  * 错误映射：rule.toggle_status.not_found → 404。
  */
 export function ruleToggleStatus(body: RuleToggleStatusBody) {
-    return request.request({
+    return request.request<RuleToggleStatusResponse>({
         url: '/admin/rule/toggle-status',
         method: 'POST',
         data: body,

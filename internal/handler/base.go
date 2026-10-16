@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -28,6 +29,15 @@ import (
 	"ai-go-mall/internal/repository"
 	"ai-go-mall/internal/service"
 )
+
+// listFilterKeys 是列表接口允许透传的模糊过滤参数白名单。
+//
+// 只有白名单内的 query key 会被写进 ListOptions.Filters；具体用不用由各实体的
+// List 实现决定（不认识的 key 一律忽略）。白名单是「列名即参数名」这一约定的
+// 唯一来源 —— 保证 Filters 的 key 不可能来自任意用户输入而被拼进 SQL。
+//
+// 覆盖 add-admin-rule-management spec 要求的 ?title= / ?name=。
+var listFilterKeys = []string{"title", "name"}
 
 // BaseHandler 提供任意模型 T 的通用 CRUD 路由处理函数。
 //
@@ -190,7 +200,17 @@ func parseListOptions(c *gin.Context) repository.ListOptions {
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	return repository.ListOptions{Page: page, PageSize: pageSize}
+	opts := repository.ListOptions{Page: page, PageSize: pageSize}
+	for _, key := range listFilterKeys {
+		// 空串 / 纯空白视为「未传」—— 避免前端把空输入框原样发过来时把结果集清空。
+		if v := strings.TrimSpace(c.Query(key)); v != "" {
+			if opts.Filters == nil {
+				opts.Filters = make(map[string]string, len(listFilterKeys))
+			}
+			opts.Filters[key] = v
+		}
+	}
+	return opts
 }
 
 // respondError 统一 JSON 错误响应。

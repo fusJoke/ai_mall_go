@@ -31,7 +31,7 @@ type stubRuleSvc struct {
 	deleteFn       func(c *gin.Context, id int64) error
 	listFn         func(c *gin.Context, opts repository.ListOptions) ([]model.AdminRule, int64, error)
 	validatePIDFn  func(c *gin.Context, id, newPID uint) error
-	toggleStatusFn func(c *gin.Context, id uint) error
+	toggleStatusFn func(c *gin.Context, id uint) (int8, error)
 	batchDeleteFn  func(c *gin.Context, ids []uint) (int, int, error)
 	listAllFn      func(c *gin.Context) ([]model.AdminRule, error)
 }
@@ -72,11 +72,11 @@ func (s *stubRuleSvc) ValidatePID(c *gin.Context, id, newPID uint) error {
 	}
 	return nil
 }
-func (s *stubRuleSvc) ToggleStatus(c *gin.Context, id uint) error {
+func (s *stubRuleSvc) ToggleStatus(c *gin.Context, id uint) (int8, error) {
 	if s.toggleStatusFn != nil {
 		return s.toggleStatusFn(c, id)
 	}
-	return nil
+	return 0, nil
 }
 func (s *stubRuleSvc) BatchDelete(c *gin.Context, ids []uint) (int, int, error) {
 	if s.batchDeleteFn != nil {
@@ -165,9 +165,11 @@ func TestRuleHandler_ListAll_InternalMapping(t *testing.T) {
 
 // --- ToggleStatus ---
 
+// TestRuleHandler_ToggleStatus_NotFoundMapping 验证 not_found 映射。
+// 注意 svc 现在返回 (status, err) —— 错误分支的 status 无意义。
 func TestRuleHandler_ToggleStatus_NotFoundMapping(t *testing.T) {
 	svc := &stubRuleSvc{
-		toggleStatusFn: func(c *gin.Context, id uint) error { return gorm.ErrRecordNotFound },
+		toggleStatusFn: func(c *gin.Context, id uint) (int8, error) { return 0, gorm.ErrRecordNotFound },
 	}
 	c, w := newRuleCtx(t)
 	postRuleJSON(c, "/admin/rule/toggle-status", ruleToggleStatusRequest{ID: 99})
@@ -183,9 +185,38 @@ func TestRuleHandler_ToggleStatus_NotFoundMapping(t *testing.T) {
 	}
 }
 
+// TestRuleHandler_ToggleStatus_ReturnsNewStatus 覆盖 spec
+// 「Admin can toggle a menu rule's status」的要求：成功响应 MUST contain the new status。
+func TestRuleHandler_ToggleStatus_ReturnsNewStatus(t *testing.T) {
+	for _, want := range []int8{0, 1} {
+		svc := &stubRuleSvc{
+			toggleStatusFn: func(c *gin.Context, id uint) (int8, error) { return want, nil },
+		}
+		c, w := newRuleCtx(t)
+		postRuleJSON(c, "/admin/rule/toggle-status", ruleToggleStatusRequest{ID: 7})
+
+		NewRuleHandler(svc).ToggleStatus(c)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal body: %v (body=%s)", err, w.Body.String())
+		}
+		got, ok := body["status"]
+		if !ok {
+			t.Fatalf("body has no \"status\" key: %s", w.Body.String())
+		}
+		if int8(got.(float64)) != want {
+			t.Errorf("body.status = %v, want %d", got, want)
+		}
+	}
+}
+
 func TestRuleHandler_ToggleStatus_InternalMapping(t *testing.T) {
 	svc := &stubRuleSvc{
-		toggleStatusFn: func(c *gin.Context, id uint) error { return errors.New("db down") },
+		toggleStatusFn: func(c *gin.Context, id uint) (int8, error) { return 0, errors.New("db down") },
 	}
 	c, w := newRuleCtx(t)
 	postRuleJSON(c, "/admin/rule/toggle-status", ruleToggleStatusRequest{ID: 7})
@@ -252,13 +283,19 @@ func TestRuleHandler_BatchDelete_InvalidInput(t *testing.T) {
 }
 
 // --- Create / EditPost PID 错误映射 ---
+//
+// 注意：create 自 spec「Admin can create a new menu rule」起会先做字段/枚举校验，
+// 因此这几个 PID 映射用例必须提交**otherwise 合法**的 body（带 Name / Type），
+// 否则会在输入校验阶段就以 rule.create.invalid_input 短路，测不到 PID 分支。
 
 func TestRuleHandler_Create_PIDCycleMapping(t *testing.T) {
 	svc := &stubRuleSvc{
 		createFn: func(c *gin.Context, e *model.AdminRule) error { return adminSvc.ErrPIDCycle },
 	}
 	c, w := newRuleCtx(t)
-	postRuleJSON(c, "/admin/rule/create", model.AdminRule{Title: "X", Pid: 7})
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Pid: 7, Type: model.RuleTypeMenu, Title: "X", Name: "x",
+	})
 
 	h := NewRuleHandler(svc)
 	h.Create(c)
@@ -276,7 +313,9 @@ func TestRuleHandler_Create_PIDNotFoundMapping(t *testing.T) {
 		createFn: func(c *gin.Context, e *model.AdminRule) error { return adminSvc.ErrPIDNotFound },
 	}
 	c, w := newRuleCtx(t)
-	postRuleJSON(c, "/admin/rule/create", model.AdminRule{Title: "X", Pid: 9999})
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Pid: 9999, Type: model.RuleTypeMenu, Title: "X", Name: "x",
+	})
 
 	h := NewRuleHandler(svc)
 	h.Create(c)
@@ -286,6 +325,130 @@ func TestRuleHandler_Create_PIDNotFoundMapping(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "rule.create.pid_not_found") {
 		t.Errorf("body = %s, want rule.create.pid_not_found", w.Body.String())
+	}
+}
+
+// --- Create 输入校验（spec: Admin can create a new menu rule） ---
+
+// TestRuleHandler_Create_RejectsEmptyTitle 覆盖 spec scenario「Empty title rejected」。
+func TestRuleHandler_Create_RejectsEmptyTitle(t *testing.T) {
+	called := false
+	svc := &stubRuleSvc{
+		createFn: func(c *gin.Context, e *model.AdminRule) error {
+			called = true
+			return nil
+		},
+	}
+	c, w := newRuleCtx(t)
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Type: model.RuleTypeMenu, Title: "", Name: "user",
+	})
+
+	NewRuleHandler(svc).Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "rule.create.invalid_input") {
+		t.Errorf("body = %s, want rule.create.invalid_input", w.Body.String())
+	}
+	if called {
+		t.Error("svc.Create was called; input validation must short-circuit before the service")
+	}
+}
+
+// TestRuleHandler_Create_RejectsWhitespaceTitle 验证「纯空白」等同空。
+func TestRuleHandler_Create_RejectsWhitespaceTitle(t *testing.T) {
+	c, w := newRuleCtx(t)
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Type: model.RuleTypeMenu, Title: "   ", Name: "user",
+	})
+
+	NewRuleHandler(&stubRuleSvc{}).Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "rule.create.invalid_input") {
+		t.Errorf("body = %s, want rule.create.invalid_input", w.Body.String())
+	}
+}
+
+// TestRuleHandler_Create_RejectsEmptyName 验证 name 同样必填。
+func TestRuleHandler_Create_RejectsEmptyName(t *testing.T) {
+	c, w := newRuleCtx(t)
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Type: model.RuleTypeMenu, Title: "用户管理", Name: "",
+	})
+
+	NewRuleHandler(&stubRuleSvc{}).Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "rule.create.invalid_input") {
+		t.Errorf("body = %s, want rule.create.invalid_input", w.Body.String())
+	}
+}
+
+// TestRuleHandler_Create_RejectsInvalidEnums 覆盖 spec scenario
+// 「Unknown type rejected」与「Invalid open_type or extend rejected」。
+func TestRuleHandler_Create_RejectsInvalidEnums(t *testing.T) {
+	badOpen := model.AdminRuleOpenType("bogus")
+	cases := []struct {
+		name string
+		body model.AdminRule
+	}{
+		{"unknown type", model.AdminRule{Type: model.AdminRuleType("unknown"), Title: "x", Name: "x"}},
+		{"unknown open_type", model.AdminRule{Type: model.RuleTypeMenu, OpenType: &badOpen, Title: "x", Name: "x"}},
+		{"unknown extend", model.AdminRule{Type: model.RuleTypeMenu, Extend: model.AdminRuleExtend("bogus"), Title: "x", Name: "x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, w := newRuleCtx(t)
+			postRuleJSON(c, "/admin/rule/create", tc.body)
+
+			NewRuleHandler(&stubRuleSvc{}).Create(c)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), "rule.create.invalid_input") {
+				t.Errorf("body = %s, want rule.create.invalid_input", w.Body.String())
+			}
+		})
+	}
+}
+
+// TestRuleHandler_Create_NormalizesOmittedEnums 验证「省略枚举字段」按 DB 默认值
+// 归一化、不误判为非法 —— 前端 create 只提交 8 个字段（不含 open_type / extend）。
+func TestRuleHandler_Create_NormalizesOmittedEnums(t *testing.T) {
+	var got *model.AdminRule
+	svc := &stubRuleSvc{
+		createFn: func(c *gin.Context, e *model.AdminRule) error {
+			got = e
+			return nil
+		},
+	}
+	c, w := newRuleCtx(t)
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{Title: "用户管理", Name: "user"})
+
+	NewRuleHandler(svc).Create(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", w.Code, w.Body.String())
+	}
+	if got == nil {
+		t.Fatal("svc.Create was not called")
+	}
+	if got.Type != model.RuleTypeMenu {
+		t.Errorf("Type = %q, want %q", got.Type, model.RuleTypeMenu)
+	}
+	if got.Extend != model.RuleExtendNone {
+		t.Errorf("Extend = %q, want %q", got.Extend, model.RuleExtendNone)
+	}
+	if got.OpenType != nil {
+		t.Errorf("OpenType = %v, want nil", *got.OpenType)
 	}
 }
 

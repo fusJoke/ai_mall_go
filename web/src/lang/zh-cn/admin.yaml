@@ -48,6 +48,9 @@ rule:
   statusOptions:
     enabled: 启用
     disabled: 禁用
+  search:
+    titlePlaceholder: 按标题搜索
+    namePlaceholder: 按名称搜索
   dialog:
     create: 新建菜单规则
     edit: 编辑菜单规则

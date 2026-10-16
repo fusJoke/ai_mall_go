@@ -402,8 +402,12 @@ func TestToggleStatus_1To0(t *testing.T) {
 	}
 	svc := NewRuleService(repo)
 
-	if err := svc.ToggleStatus(newRuleCtx(), 7); err != nil {
+	got, err := svc.ToggleStatus(newRuleCtx(), 7)
+	if err != nil {
 		t.Fatalf("ToggleStatus: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("ToggleStatus returned %d, want 0 (1→0)", got)
 	}
 	if repo.updateStatusCalls != 1 {
 		t.Errorf("repo.UpdateStatus called %d times, want 1", repo.updateStatusCalls)
@@ -421,8 +425,12 @@ func TestToggleStatus_0To1(t *testing.T) {
 	}
 	svc := NewRuleService(repo)
 
-	if err := svc.ToggleStatus(newRuleCtx(), 7); err != nil {
+	got, err := svc.ToggleStatus(newRuleCtx(), 7)
+	if err != nil {
 		t.Fatalf("ToggleStatus: %v", err)
+	}
+	if got != 1 {
+		t.Errorf("ToggleStatus returned %d, want 1 (0→1)", got)
 	}
 	if repo.lastUpdateStatus != 1 {
 		t.Errorf("UpdateStatus arg = %d, want 1 (0→1)", repo.lastUpdateStatus)
@@ -435,7 +443,7 @@ func TestRuleToggleStatus_NotFound(t *testing.T) {
 	}
 	svc := NewRuleService(repo)
 
-	if err := svc.ToggleStatus(newRuleCtx(), 99); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, err := svc.ToggleStatus(newRuleCtx(), 99); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Errorf("ToggleStatus = %v, want gorm.ErrRecordNotFound", err)
 	}
 }

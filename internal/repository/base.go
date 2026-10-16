@@ -37,6 +37,18 @@ type CRUDRepository[T any] interface {
 type ListOptions struct {
 	Page     int
 	PageSize int
+
+	// Filters 是「列名 → 关键词」的模糊过滤条件，供实体自定义列表检索。
+	//
+	// 约定：
+	//   - key 只由 handler 的白名单产出（见 parseListOptions 的 listFilterKeys），
+	//     value 一律通过占位符进 SQL，repository 实现不得把两者拼进语句；
+	//   - 实现方对**不认识**的 key 一律忽略 —— 这样给某个实体加了过滤、而其它
+	//     实体的 List 还没跟上时，多传一个 query 参数也不会报错（保持兼容）；
+	//   - nil 与空 map 同义，表示「不过滤」。
+	//
+	// 例：rule 列表按 spec 支持 ?title= / ?name=，其 List 实现读 title / name 两个 key。
+	Filters map[string]string
 }
 
 // BaseRepository 是 CRUDRepository[T] 的默认实现，零依赖、零字段。

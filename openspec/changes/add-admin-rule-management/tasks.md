@@ -251,7 +251,7 @@
   `INSERT ... SELECT ... WHERE NOT EXISTS`（对齐后来的 000012 / 000016）后连跑两次 → 仍 1 行。
   down.sql 注释「仅软删…保留审计痕迹」与实现（`DELETE FROM`，硬删）不符，已订正为描述实际行为。
 
-- [ ] 9.6（需 MySQL + dev server）`go run ./cmd/serve` + `pnpm dev`，admin 登录后访问 `/admin/rule`：
+- [x] 9.6（需 MySQL + dev server）`go run ./cmd/serve` + `pnpm dev`，admin 登录后访问 `/admin/rule`：
   - 表格加载；
   - 父节点下拉框加载全量启用规则；
   - 新增一条规则 → 列表刷新；
@@ -349,6 +349,53 @@
     **故字段名对齐后编辑仍会 500**，修复须与 D1–D4 一并处理。
 
   **结论：9.6 不勾选 —— 需先修 D1–D4（含 D3 的 mock 假绿问题），再重跑本项。**
+
+  ---
+  **验证记录 v3（2026-10-17）——D1–D4 已修复，9.6 通过，勾选本项。**
+
+  修复清单：
+
+  | # | 修复 | 落点 |
+  |---|---|---|
+  | D1 | 端到端补齐 `?title=` / `?name=` 模糊过滤：`ListOptions` 加 `Filters map[string]string`（key=列名，白名单产出）；`parseListOptions` 解析 title/name（空白视为未传）；`gormRuleRepository.List` 用 `title LIKE ?` / `name LIKE ?` 落到 SQL，**Count 与 Find 共用同一条件**；关键词里的 `\` `%` `_` 按字面量转义。前端补回搜索框（标题/名称两个输入 + 搜索按钮，回车/清空即查，搜索回到第 1 页），移除原「刻意不提供搜索框」的注释与 i18n 补 `rule.search.*` | `internal/repository/base.go`、`internal/handler/base.go`、`internal/repository/admin/rule_repository.go`、`web/src/api/rule.ts`、`web/src/views/admin/rule/index.vue`、`web/src/lang/{zh-cn,en}/admin.yaml` |
+  | D2 | `POST /admin/rule/create` 补字段与枚举校验（`normalizeAndValidateCreate`）：title / name 去空白后非空；`type ∈ {dir,menu,node}`；`open_type` 为 nil 或 ∈ {tab,link,iframe}；`extend ∈ {none,add_route_only,add_menu_only}`。**零值按「未指定」归一化为 DB 默认值**（type→menu、extend→none），避免前端只提交 8 个字段时被误判。校验顺序在 PID 之前 | `internal/handler/admin/rule.go` |
+  | D3 | `GetPID` 由 `Pluck` 改 `Select("pid")+Take` —— Pluck 查不到行时 `err=nil`，使 `ErrPIDNotFound` 分支真机不可达；`HasChildren` 同款改写为「查得到即 true」并用 `errors.Is(ErrRecordNotFound)` 判定 | `internal/repository/admin/rule_repository.go` |
+  | D4 | `ToggleStatus` 签名改为 `(c, id) (int8, error)` 返回切换后的值；handler 响应补 `status` 字段（`code`/`message` 保留兼容）；前端据此**就地更新行状态**，不再为一次启停重拉列表 | `internal/service/admin/rule.go`、`internal/handler/admin/rule.go`、`web/src/api/rule.ts`、`web/src/views/admin/rule/index.vue` |
+
+  **消除 mock 假绿**（D3 的根因是「单测自己指定了真机不可能出现的错误」）：
+  - 常规护栏 `TestRepository_GetPID_NotFound` —— sqlmock 只负责「返回 0 行」，
+    `gorm.ErrRecordNotFound` 由 GORM 自身的 `Take` 语义产生，**旧实现会失败**；
+    另补 `TestRepository_HasChildren_NotFound`、`TestRepository_List_AppliesFilters`、
+    `TestRepository_List_NoFilters`。
+  - 真连库对照 `internal/repository/admin/rule_repository_integration_test.go`
+    （`//go:build integration`，`MYSQL_TEST_DSN` 未设则 skip）：
+    `TestIntegration_GetPID_NotFound` / `_HappyPath` / `TestIntegration_HasChildren`
+    （有子 / 无子 / 不存在）/ `TestIntegration_List_Filters`（7 个子用例：全量、title 子串、
+    name 子串、空集、通配符字面量化、title∧name 组合、未知 key 忽略）。
+  - handler 侧补 5 条：空 title / 纯空白 title / 空 name / 三种非法枚举 / 省略枚举的归一化；
+    toggle 补「响应含 status」断言。
+  - **注意**：两个既有 PID 映射用例（`Create_PIDCycleMapping` / `Create_PIDNotFoundMapping`）
+    原先提交的 body 缺 Name/Type，加校验后会先被 `invalid_input` 短路 —— 已补成
+    otherwise 合法的 body（spec 的 pid_not_found scenario 本身也带齐了 title/name，
+    说明校验顺序应为「先输入、后 PID」）。
+
+  **验证结果（真机，Docker 四容器 + `./tmp/serve.exe` @:8080 + 自造 admin token）**：
+  - `verify_96.py` **37 项断言全部通过（0 失败）**；v2 的 4 条缺陷与 2 条时序异常全部转 PASS。
+  - `go build ./...` exit 0；`go vet ./internal/...` 与 `go vet -tags=integration` 均干净。
+  - `go test -count=1 ./internal/repository/admin/... ./internal/handler/admin/... ./internal/service/admin/...`
+    全 ok；`go test -tags=integration`（真连 MySQL）全 ok。
+  - 字段名契约仍 17/17 命中、无 Go 字段名泄漏。
+
+  **仍保留的既有语义（非本 change 引入，未改）**：`EditPost` 是全量更新（GORM `Save`），
+  只传部分字段会把 `created_at` 写成零值 → MySQL 1292 / HTTP 500。
+  前端 `submitForm` 的编辑分支只提交 8 个字段，**字段名对齐后编辑仍可能 500**，
+  需另起 change（改 PATCH 语义 / `update_columns`，或前端回传完整对象）。
+  v3 复验用「先 GET 完整行 → 改 title → 全量回写」模拟，故此项未被覆盖。
+
+  **清理**：本轮又造了 10 行测试数据（id ≥ 7），已硬删；6 条种子行（id 1–6）标题核对无误。
+  另：读写分离（`database.read.enabled=true`）导致的「读后写不一致」属**全局环境类**问题，
+  会让 `batch-delete` / 「删子后立刻删父」这类用例时序性抖动（v2 实测），
+  已另起 change 处理，不在本 change 范围内。
 
   **清理**：验证过程中在 `admin_rule` 造了 25 行测试数据（id 14–38），已硬删；
   误改的种子行 id=1 `title` 已复原为「管理员账号」，6 条种子行（id 1–6）核对无误。

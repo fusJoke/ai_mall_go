@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -195,38 +196,50 @@ func (r *gormRuleRepository) UpdateStatus(c *gin.Context, id uint, status int8) 
 
 // GetPID 实现 RuleRepository.GetPID。
 //
-// 取单行 pid 列（Pluck）；主键索引 O(1)，service.validatePID 沿此列
-// 上溯判环，最坏 O(depth)。记录不存在时返回 gorm.ErrRecordNotFound，
-// 由 service 区分（newPID 不存在 vs 链上 not-found）。
+// 必须用 Take 而不是 Pluck：**GORM 的 Pluck 在「查不到行」时不返回
+// gorm.ErrRecordNotFound**（目标留在零值、err 仍为 nil），调用方就没有办法把
+// 「父规则不存在」与「父规则 pid=0（顶级）」区分开 —— 前者必须报 ErrPIDNotFound，
+// 后者是合法的上溯终止点。用 Pluck 会让 service.ValidatePID 的 not-found 分支
+// 永远不可达，于是 pid 指向不存在节点的孤儿规则可以写进库。
+// Take 在无行时返回 gorm.ErrRecordNotFound，语义正确。
+//
+// 只 Select pid 一列，主键索引 O(1)；service.validatePID 沿此列上溯判环，
+// 最坏 O(depth)。
 func (r *gormRuleRepository) GetPID(c *gin.Context, id uint) (uint, error) {
-	var pid uint
+	var rule model.AdminRule
 	err := repository.DB(c).
-		Model(&model.AdminRule{}).
+		Select("pid").
 		Where("id = ?", id).
-		Pluck("pid", &pid).Error
+		Take(&rule).Error
 	if err != nil {
 		return 0, err
 	}
-	return pid, nil
+	return rule.Pid, nil
 }
 
 // HasChildren 实现 RuleRepository.HasChildren。
 //
-// 单条 `SELECT 1 FROM admin_rule WHERE pid = ? AND deleted_at IS NULL LIMIT 1`：
+// 单条 `SELECT id FROM admin_rule WHERE pid = ? AND deleted_at IS NULL LIMIT 1`：
 // 命中任意子节点即 true，不做计数 —— service 层只关心"有没有"而不是"有几个"。
 // 空 pid=0 也走这条 SQL（pid=0 是顶级标志，理论上不该有子，但 GORM 仍会查）；
 // 当前设计 pid=0 是顶级，调用方（service.Delete）只在 pid!=0 的节点上调用。
+//
+// 判据是「有没有查到行」而不是「字段值是否非零」：这里同样不用 Pluck ——
+// 即便 Pluck 在这条上恰好也能work（子节点 id 必非 0），同文件里两种写法并存
+// 迟早会被复制错地方。用 Take + errors.Is(ErrRecordNotFound) 表意更明确。
 func (r *gormRuleRepository) HasChildren(c *gin.Context, id uint) (bool, error) {
-	var one int
+	var child model.AdminRule
 	err := repository.DB(c).
-		Model(&model.AdminRule{}).
+		Select("id").
 		Where("pid = ?", id).
-		Limit(1).
-		Pluck("id", &one).Error
+		Take(&child).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	return one != 0, nil
+	return true, nil
 }
 
 // GetByID 实现 RuleRepository.GetByID。
@@ -241,15 +254,56 @@ func (r *gormRuleRepository) GetByID(c *gin.Context, id uint) (*model.AdminRule,
 	return &rule, nil
 }
 
+// ruleFilterColumns 是 admin_rule 列表允许模糊过滤的列（= ListOptions.Filters 的 key）。
+//
+// 与 handler.listFilterKeys 的白名单对应；这里再固定一次列名，保证拼进 SQL 的是
+// 常量而不是调用方传进来的字符串。
+const (
+	ruleFilterTitle = "title"
+	ruleFilterName  = "name"
+)
+
+// escapeLikePattern 转义 LIKE 的通配符，让关键词按**字面量**匹配。
+//
+// 不转义的话，用户输入 `%` 会被当成通配符而匹配到全部行（`_` 同理），
+// 与 spec 的「fuzzy-match」语义不符。MySQL 默认转义符是反斜杠，
+// 因此无需额外写 ESCAPE 子句。
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+// filteredQuery 按 opts.Filters 构造列表查询（每次返回**新的** *gorm.DB）。
+//
+// 必须每次重建而不是复用同一个 builder：`Count` 会往 Statement 里塞
+// `SELECT count(*)`，复用会让随后的 Find 也带上计数子句。
+//
+// 不认识的 key 一律忽略（见 repository.ListOptions.Filters 的约定）——
+// 这样给别的实体加过滤时，rule 列表不会因为多收一个参数而报错。
+func (r *gormRuleRepository) filteredQuery(c *gin.Context, filters map[string]string) *gorm.DB {
+	db := repository.DB(c).Model(&model.AdminRule{})
+	if v := strings.TrimSpace(filters[ruleFilterTitle]); v != "" {
+		db = db.Where("title LIKE ?", "%"+escapeLikePattern(v)+"%")
+	}
+	if v := strings.TrimSpace(filters[ruleFilterName]); v != "" {
+		db = db.Where("name LIKE ?", "%"+escapeLikePattern(v)+"%")
+	}
+	return db
+}
+
 // List 实现 RuleRepository.List。
 //
 // 走 repository.DB(c) 拿 request-scoped DB，Page 从 1 计。
-// total 通过单独 Count 取，避免 offset 越大越慢。
+// total 通过单独 Count 取，避免 offset 越大越慢；Count 与 Find 共用
+// filteredQuery 的条件，保证「总数」与「当前页」出自同一筛选口径。
+//
+// 模糊匹配依赖列的排序规则（utf8mb4_general_ci）实现大小写不敏感，
+// 与 spec scenario「Filtered by title」的 case-insensitive 要求一致。
 func (r *gormRuleRepository) List(c *gin.Context, opts repository.ListOptions) ([]model.AdminRule, int64, error) {
-	db := repository.DB(c)
-
 	var total int64
-	if err := db.Model(&model.AdminRule{}).Count(&total).Error; err != nil {
+	if err := r.filteredQuery(c, opts.Filters).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -259,7 +313,7 @@ func (r *gormRuleRepository) List(c *gin.Context, opts repository.ListOptions) (
 	}
 
 	offset := (opts.Page - 1) * opts.PageSize
-	if err := db.Model(&model.AdminRule{}).
+	if err := r.filteredQuery(c, opts.Filters).
 		Offset(offset).
 		Limit(opts.PageSize).
 		Find(&items).Error; err != nil {

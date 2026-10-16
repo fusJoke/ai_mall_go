@@ -46,6 +46,9 @@ rule:
   statusOptions:
     enabled: Enabled
     disabled: Disabled
+  search:
+    titlePlaceholder: Search by title
+    namePlaceholder: Search by name
   dialog:
     create: Create Menu Rule
     edit: Edit Menu Rule

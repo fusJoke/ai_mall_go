@@ -1,10 +1,26 @@
 <template>
     <div class="admin-rule">
-        <!-- 顶部工具栏：新增 + 批量删除 -->
-        <!-- 刻意不提供搜索框：后端 rule.List 不支持 keyword 参数，放一个点了没反应的
-             输入框会误导使用者以为能搜（OCR 审查 P2-6）。要加搜索需先补
-             后端 keyword（title/name/path 模糊匹配）再放回 UI。 -->
+        <!-- 顶部工具栏：搜索 + 新增 + 批量删除 -->
+        <!-- 搜索对应 spec「Admin can list and search menu rules」的 ?title= / ?name=：
+             后端 parseListOptions 解析这两个 query、rule.List 用 LIKE 落到 SQL。 -->
         <div class="toolbar">
+            <el-input
+                v-model="searchTitle"
+                :placeholder="$t('rule.search.titlePlaceholder')"
+                clearable
+                style="width: 220px"
+                @keyup.enter="handleSearch"
+                @clear="handleSearch"
+            />
+            <el-input
+                v-model="searchName"
+                :placeholder="$t('rule.search.namePlaceholder')"
+                clearable
+                style="width: 220px"
+                @keyup.enter="handleSearch"
+                @clear="handleSearch"
+            />
+            <el-button type="primary" @click="handleSearch">{{ $t('actions.search') }}</el-button>
             <el-button type="primary" @click="openCreateDialog">{{ $t('rule.dialog.create') }}</el-button>
             <el-button type="danger" :disabled="selectedIds.length === 0" @click="handleBatchDelete">
                 {{ $t('rule.action.batchDelete') }}
@@ -161,12 +177,26 @@ const items = ref<AdminRule[]>([])
 const loading = ref<boolean>(false)
 const selectedIds = ref<number[]>([])
 
+// --- 搜索条件（对应后端 ?title= / ?name=） ---
+
+const searchTitle = ref<string>('')
+const searchName = ref<string>('')
+
+// handleSearch 先回到第 1 页再查：停在第 N 页搜出 0 条会被误读成「没有数据」。
+function handleSearch() {
+    page.value = 1
+    void loadList()
+}
+
 async function loadList() {
     loading.value = true
     try {
         const { data } = await ruleList({
             page: page.value,
             page_size: pageSize.value,
+            // 空输入不传参数（后端也把空串按「未传」处理，两边都兜一层）。
+            title: searchTitle.value.trim() || undefined,
+            name: searchName.value.trim() || undefined,
         })
         items.value = data.items ?? []
         total.value = data.total ?? 0
@@ -319,14 +349,22 @@ async function submitForm() {
 // --- 行内操作 ---
 
 async function handleToggleStatus(row: AdminRule) {
+    let next: 0 | 1 | undefined
     try {
-        await ruleToggleStatus({ id: row.id })
+        const { data } = await ruleToggleStatus({ id: row.id })
+        next = data.status
     } catch {
         // 业务错误（如 404 rule.toggle_status.not_found）由 request 拦截器统一 toast。
         return
     }
     ElMessage.success(t('rule.action.toggleStatus'))
-    loadList()
+    if (next === 0 || next === 1) {
+        // 后端在响应里回了切换后的 status → 就地更新，不必为一次启停再拉整个列表。
+        row.status = next
+    } else {
+        // 兜底：老响应体没有 status 时退回整表刷新。
+        void loadList()
+    }
 }
 
 async function handleDelete(row: AdminRule) {

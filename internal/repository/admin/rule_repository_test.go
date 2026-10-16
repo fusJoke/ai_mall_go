@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -157,7 +158,7 @@ func TestRepository_UpdateStatus(t *testing.T) {
 	}
 }
 
-// TestRepository_GetPID 验证 GetPID 生成 Pluck pid SQL。
+// TestRepository_GetPID 验证 GetPID 命中时返回该行的 pid。
 func TestRepository_GetPID(t *testing.T) {
 	c, mock := newRuleMockContext(t)
 
@@ -171,6 +172,27 @@ func TestRepository_GetPID(t *testing.T) {
 	}
 	if got != 2 {
 		t.Errorf("GetPID = %d, want 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestRepository_GetPID_NotFound 是 D3 的常规回归护栏。
+//
+// 这条用例**不依赖 mock 编造错误**：sqlmock 只负责「返回 0 行」，
+// gorm.ErrRecordNotFound 由 GORM 自身的 Take 语义产生 —— 也就是说它真的在
+// 检验真机行为。旧实现用 Pluck，0 行时 err=nil（pid 留在零值），本用例会失败；
+// 这正是 9.6 复验里「pid=999999 的孤儿规则被写进库」的根因。
+func TestRepository_GetPID_NotFound(t *testing.T) {
+	c, mock := newRuleMockContext(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WillReturnRows(sqlmock.NewRows([]string{"pid"}))
+
+	_, err := newTestRuleRepository().GetPID(c, 999999)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("GetPID(999999) err = %v, want gorm.ErrRecordNotFound", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("mock expectations: %v", err)
@@ -211,6 +233,75 @@ func TestRepository_HasChildren_False(t *testing.T) {
 	}
 	if ok {
 		t.Errorf("HasChildren = true, want false")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestRepository_HasChildren_NotFound 验证「父 id 不存在」也返回 false 且 err 为 nil
+// —— 与「无子节点」同解，调用方（service.Delete）据此放行删除。
+func TestRepository_HasChildren_NotFound(t *testing.T) {
+	c, mock := newRuleMockContext(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	ok, err := newTestRuleRepository().HasChildren(c, 999999)
+	if err != nil {
+		t.Fatalf("HasChildren(999999) err = %v, want nil", err)
+	}
+	if ok {
+		t.Errorf("HasChildren(999999) = true, want false")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestRepository_List_AppliesFilters 覆盖 D1：ListOptions.Filters 必须真的落 SQL，
+// 且 Count 与 Find 用同一组条件（否则 total 与当前页不同口径）。
+func TestRepository_List_AppliesFilters(t *testing.T) {
+	c, mock := newRuleMockContext(t)
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM .*admin_rule.* WHERE title LIKE \? AND name LIKE \?`).
+		WithArgs("%管理%", "%rule%").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	mock.ExpectQuery(`SELECT \* FROM .*admin_rule.* WHERE title LIKE \? AND name LIKE \?`).
+		WithArgs("%管理%", "%rule%", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "name"}).
+			AddRow(uint(1), "管理员账号", "admin/rule"))
+
+	items, total, err := newTestRuleRepository().List(c, repository.ListOptions{
+		Page:     1,
+		PageSize: 20,
+		Filters:  map[string]string{"title": "管理", "name": "rule"},
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Errorf("(total, len) = (%d, %d), want (1, 1)", total, len(items))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestRepository_List_NoFilters 验证无过滤时不产生任何 WHERE ... LIKE。
+func TestRepository_List_NoFilters(t *testing.T) {
+	c, mock := newRuleMockContext(t)
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM .*admin_rule`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+
+	items, total, err := newTestRuleRepository().List(c, repository.ListOptions{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Errorf("(total, len) = (%d, %d), want (0, 0)", total, len(items))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("mock expectations: %v", err)
