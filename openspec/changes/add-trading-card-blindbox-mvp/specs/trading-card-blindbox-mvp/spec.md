@@ -8,25 +8,29 @@
 
 ### Requirement: mall_users field schema
 
-`mall_users` 表 SHALL 在现有 `users` 表基础上扩展（迁移 000006 完成），字段如下：
+`mall_users` 表 SHALL 在现有 `users` 表基础上扩展（迁移 000006 完成），字段清单见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `username` | varchar(64) | "" | 否 | 用户名（登录用），全局唯一 |
-| `password_hash` | varchar(255) | "" | 否 | bcrypt 哈希后的密码 |
-| `nickname` | varchar(64) | "" | 否 | 昵称 |
-| `avatar` | varchar(255) | "" | 否 | 头像 URL |
-| `mobile` | varchar(20) | NULL | 是 | 手机号，全局唯一 |
-| `email` | varchar(128) | NULL | 是 | 邮箱，全局唯一 |
-| `balance` | decimal(10,2) | 0.00 | 否 | 平台账户余额 |
-| `status` | tinyint | 1 | 否 | 1=启用 / 0=禁用 |
-| `last_login_at` | datetime(3) | NULL | 是 | 最后登录时间 |
-| `last_login_ip` | varchar(45) | "" | 否 | 最后登录 IP |
-| `login_failure` | int | 0 | 否 | 累计登录失败次数，达阈值禁用 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000006 建立的表结构
+- **WHEN** 迁移 000006 执行完成
+- **THEN** `mall_users` 具有下列字段：
+
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `username` | varchar(64) | "" | 否 | 用户名（登录用），全局唯一 |
+  | `password_hash` | varchar(255) | "" | 否 | bcrypt 哈希后的密码 |
+  | `nickname` | varchar(64) | "" | 否 | 昵称 |
+  | `avatar` | varchar(255) | "" | 否 | 头像 URL |
+  | `mobile` | varchar(20) | NULL | 是 | 手机号，全局唯一 |
+  | `email` | varchar(128) | NULL | 是 | 邮箱，全局唯一 |
+  | `balance` | decimal(10,2) | 0.00 | 否 | 平台账户余额 |
+  | `status` | tinyint | 1 | 否 | 1=启用 / 0=禁用 |
+  | `last_login_at` | datetime(3) | NULL | 是 | 最后登录时间 |
+  | `last_login_ip` | varchar(45) | "" | 否 | 最后登录 IP |
+  | `login_failure` | int | 0 | 否 | 累计登录失败次数，达阈值禁用 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
 
 #### Scenario: Seed user login
 - **WHEN** seed 创建一条 username="alice", password_hash=bcrypt("alice123"), balance=1000.00 的记录
@@ -40,24 +44,28 @@
 
 ### Requirement: mall_suppliers field schema
 
-`mall_suppliers` 表 SHALL 存储供应商主体（迁移 000007 创建基础字段；迁移 000011 加结算字段）：
+`mall_suppliers` 表 SHALL 存储供应商主体（迁移 000007 创建基础字段；迁移 000011 加结算字段），字段清单见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `name` | varchar(100) | "" | 否 | 供应商名称（用户可见） |
-| `logo` | varchar(255) | "" | 否 | 供应商 logo URL |
-| `bio` | varchar(500) | "" | 否 | 简介 |
-| `contact_phone` | varchar(20) | "" | 否 | 联系电话 |
-| `contact_email` | varchar(128) | NULL | 是 | 联系邮箱 |
-| `status` | varchar(16) | 'active' | 否 | active / disabled |
-| `is_featured` | tinyint(1) | 0 | 否 | 是否推荐位（ES 过滤条件之一） |
-| `balance` | decimal(12,2) | 0.00 | 否 | 待结算余额（000011 加） |
-| `total_sales` | decimal(12,2) | 0.00 | 否 | 累计销售额（000011 加） |
-| `commission_rate` | decimal(5,4) | NULL | 是 | 供应商级手续费率（000011 加；NULL 走全局默认） |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000007 / 000011 建立的表结构
+- **WHEN** 迁移 000007 与 000011 执行完成
+- **THEN** `mall_suppliers` 具有下列字段：
+
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `name` | varchar(100) | "" | 否 | 供应商名称（用户可见） |
+  | `logo` | varchar(255) | "" | 否 | 供应商 logo URL |
+  | `bio` | varchar(500) | "" | 否 | 简介 |
+  | `contact_phone` | varchar(20) | "" | 否 | 联系电话 |
+  | `contact_email` | varchar(128) | NULL | 是 | 联系邮箱 |
+  | `status` | varchar(16) | 'active' | 否 | active / disabled |
+  | `is_featured` | tinyint(1) | 0 | 否 | 是否推荐位（ES 过滤条件之一） |
+  | `balance` | decimal(12,2) | 0.00 | 否 | 待结算余额（000011 加） |
+  | `total_sales` | decimal(12,2) | 0.00 | 否 | 累计销售额（000011 加） |
+  | `commission_rate` | decimal(5,4) | NULL | 是 | 供应商级手续费率（000011 加；NULL 走全局默认） |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
 
 #### Scenario: Admin disables a supplier
 - **WHEN** admin 调用 `POST /api/v1/admin/supplier/:id/toggle_status`，传入 disabled
@@ -71,20 +79,24 @@
 
 ### Requirement: mall_supplier_users field schema
 
-`mall_supplier_users` 表 SHALL 存储供应商登录账号（迁移 000007）：
+`mall_supplier_users` 表 SHALL 存储供应商登录账号（迁移 000007），字段清单见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id，全局唯一索引（一个供应商一个登录账号） |
-| `username` | varchar(64) | "" | 否 | 登录用户名，全局唯一 |
-| `password_hash` | varchar(255) | "" | 否 | bcrypt 哈希 |
-| `status` | tinyint | 1 | 否 | 1=启用 / 0=禁用 |
-| `last_login_at` | datetime(3) | NULL | 是 | 最后登录时间 |
-| `last_login_ip` | varchar(45) | "" | 否 | 最后登录 IP |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000007 建立的表结构
+- **WHEN** 迁移 000007 执行完成
+- **THEN** `mall_supplier_users` 具有下列字段：
+
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id，全局唯一索引（一个供应商一个登录账号） |
+  | `username` | varchar(64) | "" | 否 | 登录用户名，全局唯一 |
+  | `password_hash` | varchar(255) | "" | 否 | bcrypt 哈希 |
+  | `status` | tinyint | 1 | 否 | 1=启用 / 0=禁用 |
+  | `last_login_at` | datetime(3) | NULL | 是 | 最后登录时间 |
+  | `last_login_ip` | varchar(45) | "" | 否 | 最后登录 IP |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
 
 #### Scenario: Supplier self-registration
 - **WHEN** 供应商提交 username="panini_admin", supplier_name="Panini 旗舰店", password="xxx"
@@ -98,20 +110,24 @@
 
 ### Requirement: mall_cards field schema
 
-`mall_cards` 表 SHALL 存储卡牌主数据（迁移 000008）：
+`mall_cards` 表 SHALL 存储卡牌主数据（迁移 000008），字段清单见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `name` | varchar(100) | "" | 否 | 卡名（如"勒布朗·詹姆斯 2024 签名卡"） |
-| `image` | varchar(255) | "" | 否 | 卡图 URL |
-| `team` | varchar(50) | "" | 否 | 球队 |
-| `player` | varchar(50) | "" | 否 | 球员 |
-| `serial_no` | varchar(50) | "" | 否 | 编号（如"008/100"） |
-| `description` | varchar(500) | "" | 否 | 卡描述 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000008 建立的卡牌表结构
+- **WHEN** 迁移 000008 执行完成
+- **THEN** `mall_cards` 具有下列字段：
+
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `name` | varchar(100) | "" | 否 | 卡名（如"勒布朗·詹姆斯 2024 签名卡"） |
+  | `image` | varchar(255) | "" | 否 | 卡图 URL |
+  | `team` | varchar(50) | "" | 否 | 球队 |
+  | `player` | varchar(50) | "" | 否 | 球员 |
+  | `serial_no` | varchar(50) | "" | 否 | 编号（如"008/100"） |
+  | `description` | varchar(500) | "" | 否 | 卡描述 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
 
 #### Scenario: Card is reused across pools
 - **WHEN** 同一张 mall_card.id=5 同时出现在 mall_card_pool_items 两个不同池里
@@ -121,24 +137,28 @@
 
 ### Requirement: mall_blind_boxes field schema
 
-`mall_blind_boxes` 表 SHALL 存储盲盒 SKU（迁移 000008）：
+`mall_blind_boxes` 表 SHALL 存储盲盒 SKU（迁移 000008），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id（强制非空，纯多供应商） |
-| `name` | varchar(100) | "" | 否 | 盲盒名 |
-| `cover` | varchar(255) | "" | 否 | 封面图 URL |
-| `description` | text | "" | 否 | 盲盒描述 |
-| `price` | decimal(10,2) | 0.00 | 否 | 原价 |
-| `status` | varchar(16) | 'active' | 否 | active / disabled |
-| `on_sale` | tinyint(1) | 0 | 否 | 是否在售 |
-| `is_featured` | tinyint(1) | 0 | 否 | 是否推荐位 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000008 建立的盲盒表结构
+- **WHEN** 迁移 000008 执行完成
+- **THEN** `mall_blind_boxes` 具有下列字段：
 
-索引：`(supplier_id, status, on_sale)`, `(is_featured, status, on_sale)`
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id（强制非空，纯多供应商） |
+  | `name` | varchar(100) | "" | 否 | 盲盒名 |
+  | `cover` | varchar(255) | "" | 否 | 封面图 URL |
+  | `description` | text | "" | 否 | 盲盒描述 |
+  | `price` | decimal(10,2) | 0.00 | 否 | 原价 |
+  | `status` | varchar(16) | 'active' | 否 | active / disabled |
+  | `on_sale` | tinyint(1) | 0 | 否 | 是否在售 |
+  | `is_featured` | tinyint(1) | 0 | 否 | 是否推荐位 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立索引 `(supplier_id, status, on_sale)` 与 `(is_featured, status, on_sale)`
 
 #### Scenario: Blind box requires supplier
 - **WHEN** 创建 blind_box 时 supplier_id 未指定
@@ -171,21 +191,25 @@
 
 ### Requirement: mall_card_pool_items field schema
 
-`mall_card_pool_items` 表 SHALL 存储池内卡及概率/库存（迁移 000008）：
+`mall_card_pool_items` 表 SHALL 存储池内卡及概率/库存（迁移 000008），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `pool_id` | bigint | 0 | 否 | FK mall_card_pools.id |
-| `card_id` | bigint | 0 | 否 | FK mall_cards.id |
-| `rarity` | varchar(8) | 'N' | 否 | SSR / SR / R / N |
-| `weight` | int | 0 | 否 | 权重，同池加和固定 10000 |
-| `stock` | int | 0 | 否 | 剩余库存 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000008 建立的池内卡表结构
+- **WHEN** 迁移 000008 执行完成
+- **THEN** `mall_card_pool_items` 具有下列字段：
 
-索引：`(pool_id, stock)`（事务内抽卡时 `WHERE pool_id=? AND stock>0 FOR UPDATE` 走索引）
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `pool_id` | bigint | 0 | 否 | FK mall_card_pools.id |
+  | `card_id` | bigint | 0 | 否 | FK mall_cards.id |
+  | `rarity` | varchar(8) | 'N' | 否 | SSR / SR / R / N |
+  | `weight` | int | 0 | 否 | 权重，同池加和固定 10000 |
+  | `stock` | int | 0 | 否 | 剩余库存 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立索引 `(pool_id, stock)`，供事务内 `WHERE pool_id=? AND stock>0 FOR UPDATE` 走索引
 
 #### Scenario: Pool weight sums to 10000
 - **WHEN** 供应商配置 SSR weight=300, SR weight=1200, R weight=3500, N weight=5000
@@ -203,22 +227,26 @@
 
 ### Requirement: mall_draw_orders field schema
 
-`mall_draw_orders` 表 SHALL 存储抽卡订单（迁移 000009）：
+`mall_draw_orders` 表 SHALL 存储抽卡订单（迁移 000009），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `order_no` | varchar(32) | "" | 否 | 订单号（UUID，全局唯一） |
-| `user_id` | bigint | 0 | 否 | FK mall_users.id |
-| `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id（冗余，便于按供应商聚合） |
-| `price` | decimal(10,2) | 0.00 | 否 | 实际支付价（含活动价） |
-| `status` | varchar(16) | 'paid' | 否 | paid / drawn / failed |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000009 建立的订单表结构
+- **WHEN** 迁移 000009 执行完成
+- **THEN** `mall_draw_orders` 具有下列字段：
 
-索引：`(user_id, created_at DESC)`（用户订单分页）
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `order_no` | varchar(32) | "" | 否 | 订单号（UUID，全局唯一） |
+  | `user_id` | bigint | 0 | 否 | FK mall_users.id |
+  | `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id（冗余，便于按供应商聚合） |
+  | `price` | decimal(10,2) | 0.00 | 否 | 实际支付价（含活动价） |
+  | `status` | varchar(16) | 'paid' | 否 | paid / drawn / failed |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立索引 `(user_id, created_at DESC)`，供用户订单分页
 
 #### Scenario: Single draw creates one order
 - **WHEN** 用户抽一次
@@ -248,25 +276,28 @@
 
 ### Requirement: mall_promotions field schema
 
-`mall_promotions` 表 SHALL 存储限时特价活动（迁移 000010）：
+`mall_promotions` 表 SHALL 存储限时特价活动（迁移 000010），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
-| `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
-| `original_price` | decimal(10,2) | 0.00 | 否 | 原价（冗余，便于历史追溯） |
-| `promo_price` | decimal(10,2) | 0.00 | 否 | 活动价 |
-| `start_at` | datetime(3) | now(3) | 否 | 活动开始时间 |
-| `end_at` | datetime(3) | now(3) | 否 | 活动结束时间 |
-| `status` | varchar(16) | 'active' | 否 | active / disabled |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000010 建立的活动表结构
+- **WHEN** 迁移 000010 执行完成
+- **THEN** `mall_promotions` 具有下列字段：
 
-索引：
-- 唯一索引：`(blind_box_id, start_at)` —— 同一盲盒时间不重叠
-- 普通索引：`(status, end_at)` —— 查"当前生效活动"
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
+  | `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
+  | `original_price` | decimal(10,2) | 0.00 | 否 | 原价（冗余，便于历史追溯） |
+  | `promo_price` | decimal(10,2) | 0.00 | 否 | 活动价 |
+  | `start_at` | datetime(3) | now(3) | 否 | 活动开始时间 |
+  | `end_at` | datetime(3) | now(3) | 否 | 活动结束时间 |
+  | `status` | varchar(16) | 'active' | 否 | active / disabled |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立唯一索引 `(blind_box_id, start_at)`，保证同一盲盒时间不重叠
+- **AND** 建立普通索引 `(status, end_at)`，供查询"当前生效活动"
 
 #### Scenario: Active promotion applied at draw time
 - **WHEN** 用户抽卡时 NOW() 落在某 mall_promotions 的 [start_at, end_at) 内且 status='active'
@@ -284,16 +315,20 @@
 
 ### Requirement: Draw transaction atomicity
 
-抽卡接口 SHALL 在单个数据库事务内完成下列步骤，任一步失败则全部回滚：
+抽卡接口 SHALL 在单个数据库事务内完成选卡、计费、扣款与落单，任一步失败则全部回滚；步骤清单见 scenario。
 
-1. `SELECT * FROM mall_card_pool_items WHERE pool_id = ? FOR UPDATE`
-2. 计算 Σ(weight_i) for stock > 0；若 Σ = 0 → `ErrSoldOut`
-3. `rand(0, Σ)` 命中 item
-4. `UPDATE mall_card_pool_items SET stock = stock - 1 WHERE id = ? AND stock > 0`（影响行数 = 0 → 重试 1 次）
-5. `SELECT price, COALESCE(promo_price, price) AS actual_price FROM mall_blind_boxes bb LEFT JOIN mall_promotions p ...`（同事务）
-6. `UPDATE mall_users SET balance = balance - actual_price WHERE id = ? AND balance >= actual_price`（影响行数 = 0 → `ErrInsufficientBalance`）
-7. `INSERT mall_draw_orders`
-8. `INSERT mall_draw_order_items`
+#### Scenario: 事务内的固定步骤序列
+- **WHEN** 抽卡事务开启
+- **THEN** 依次执行下列步骤，任一步失败即整体回滚：
+
+  1. `SELECT * FROM mall_card_pool_items WHERE pool_id = ? FOR UPDATE`
+  2. 计算 Σ(weight_i) for stock > 0；若 Σ = 0 → `ErrSoldOut`
+  3. `rand(0, Σ)` 命中 item
+  4. `UPDATE mall_card_pool_items SET stock = stock - 1 WHERE id = ? AND stock > 0`（影响行数 = 0 → 重试 1 次）
+  5. `SELECT price, COALESCE(promo_price, price) AS actual_price FROM mall_blind_boxes bb LEFT JOIN mall_promotions p ...`（同事务）
+  6. `UPDATE mall_users SET balance = balance - actual_price WHERE id = ? AND balance >= actual_price`（影响行数 = 0 → `ErrInsufficientBalance`）
+  7. `INSERT mall_draw_orders`
+  8. `INSERT mall_draw_order_items`
 
 #### Scenario: Successful draw
 - **WHEN** 用户 balance=1000、blind_box price=99、pool 有 1 张 SSR weight=300 stock=50
@@ -342,26 +377,22 @@
 
 ### Requirement: Home feed via Elasticsearch
 
-首页 feed 接口 SHALL 以 Elasticsearch 为主检索路径：
+首页 feed 接口 SHALL 以 Elasticsearch 为主检索路径，两个索引的过滤与排序口径见 scenario。
 
-- 索引 `mall_blind_box_index`：过滤 `status=active AND on_sale=true AND lifecycle='selling'`（且其供应商 `status=active`），按 `hot_score DESC, created_at DESC` 排序
-  - 口径沿革：自 change `add-batch-settlement`（「商品即批次」）起，`is_featured` 不再是盲盒的收录门槛，仅作排序字段；本行以**当前生效口径**为准，不再要求 `is_featured=true`。
-- 索引 `mall_supplier_index`：过滤 `status=active AND is_featured=true`，按 `featured_rank ASC, blind_box_count DESC` 排序
-- 应用层只读 ES，文档形态是"投影"（见 design D7）
-- ES 不可用（连接失败 / 超时 / 索引 schema 漂移）→ SHALL 降级查询 MySQL，响应结构与主路径同构
-  （修订：详见 change `add-uni-h5-client` 的 capability `home-feed-fallback`）
-- 仅当 ES 与 MySQL 降级查询**均**失败 → HTTP 500 + `code=search_unavailable`
-
-#### Scenario: ES query returns on-sale items
-- **WHEN** GET /api/v1/user/home/feed 调用
-- **THEN** 响应包含在售盲盒列表 + featured 供应商列表，按上述规则排序
+#### Scenario: 两个索引的收录与排序口径
+- **WHEN** 首页 feed 接口检索
+- **THEN** 索引 `mall_blind_box_index` 过滤 `status=active AND on_sale=true AND lifecycle='selling'`（且其供应商 `status=active`），按 `hot_score DESC, created_at DESC` 排序
+- **AND** 索引 `mall_supplier_index` 过滤 `status=active AND is_featured=true`，按 `featured_rank ASC, blind_box_count DESC` 排序
+- **AND** 应用层只读 ES，文档形态是"投影"（见 design D7）
+- **AND** 口径沿革：自 change `add-batch-settlement`（「商品即批次」）起，`is_featured` 不再是盲盒的收录门槛，仅作排序字段；本行以**当前生效口径**为准，不再要求 `is_featured=true`
 
 #### Scenario: ES unavailable degrades to MySQL
-- **WHEN** ES 连接超时或查询报错
-- **THEN** 接口 SHALL 降级查询 MySQL 并返回 HTTP 200（响应结构与主路径一致）
+- **WHEN** ES 不可用（连接失败 / 超时 / 索引 schema 漂移），或查询报错
+- **THEN** 接口 SHALL 降级查询 MySQL 并返回 HTTP 200，响应结构与主路径同构
 - **AND** 响应 MUST 携带标识数据来源的响应头
-- **AND** 仅当降级查询亦失败时，才返回 HTTP 500 + `code=search_unavailable`
+- **AND** 仅当 ES 与 MySQL 降级查询**均**失败时，才返回 HTTP 500 + `code=search_unavailable`
 
+> 降级语义的完整定义见 change `add-uni-h5-client` 的 capability `home-feed-fallback`。
 > 本条修订自原表述「ES 不可用 → HTTP 500 + `code=search_unavailable`（不 fallback）」。
 > 修订原因：ES 抖动导致 C 端首页整体不可用，是可用性事故；降级到 MySQL 可保持
 > 首页可用。互斥表述 MUST NOT 残留。
@@ -386,7 +417,7 @@
 
 ### Requirement: Configuration for Redis and ES
 
-新增两个配置文件：
+`config/cache.yaml` 与 `config/search.yaml` 两个配置文件 SHALL 新增，分别承载 Redis 与 Elasticsearch 连接参数：
 
 `config/cache.yaml`：
 ```yaml
@@ -461,29 +492,32 @@ ttl:
 
 ### Requirement: mall_settlements field schema
 
-`mall_settlements` 表 SHALL 存储结算单（迁移 000011）：
+`mall_settlements` 表 SHALL 存储结算单（迁移 000011），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
-| `period_start` | datetime(3) | now(3) | 否 | 周期开始（含） |
-| `period_end` | datetime(3) | now(3) | 否 | 周期结束（不含） |
-| `total_amount` | decimal(12,2) | 0.00 | 否 | 周期内销售总额 |
-| `commission_rate` | decimal(5,4) | 0.0000 | 否 | 当时手续费率快照 |
-| `commission_amount` | decimal(12,2) | 0.00 | 否 | 平台手续费 |
-| `payout_amount` | decimal(12,2) | 0.00 | 否 | 应付供应商 |
-| `status` | varchar(16) | 'pending' | 否 | pending / processing / paid / failed |
-| `paid_at` | datetime(3) | NULL | 是 | 标记打款时间 |
-| `paid_by` | bigint | NULL | 是 | 标记打款的 admin id |
-| `remark` | varchar(255) | "" | 否 | 备注 / 银行流水号 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000011 建立的结算单表结构
+- **WHEN** 迁移 000011 执行完成
+- **THEN** `mall_settlements` 具有下列字段：
 
-索引：
-- 唯一索引：`(supplier_id, period_start, period_end)` —— 防止同一周期重复结算
-- 普通索引：`(status, created_at)` —— 列表分页
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
+  | `period_start` | datetime(3) | now(3) | 否 | 周期开始（含） |
+  | `period_end` | datetime(3) | now(3) | 否 | 周期结束（不含） |
+  | `total_amount` | decimal(12,2) | 0.00 | 否 | 周期内销售总额 |
+  | `commission_rate` | decimal(5,4) | 0.0000 | 否 | 当时手续费率快照 |
+  | `commission_amount` | decimal(12,2) | 0.00 | 否 | 平台手续费 |
+  | `payout_amount` | decimal(12,2) | 0.00 | 否 | 应付供应商 |
+  | `status` | varchar(16) | 'pending' | 否 | pending / processing / paid / failed |
+  | `paid_at` | datetime(3) | NULL | 是 | 标记打款时间 |
+  | `paid_by` | bigint | NULL | 是 | 标记打款的 admin id |
+  | `remark` | varchar(255) | "" | 否 | 备注 / 银行流水号 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立唯一索引 `(supplier_id, period_start, period_end)`，防止同一周期重复结算
+- **AND** 建立普通索引 `(status, created_at)`，供列表分页
 
 #### Scenario: Settlement generated from pending orders
 - **WHEN** admin POST /admin/settlements {supplier_id, period_start, period_end}
@@ -501,19 +535,23 @@ ttl:
 
 ### Requirement: mall_settlement_items field schema
 
-`mall_settlement_items` 表 SHALL 存储结算单关联订单明细（迁移 000011）：
+`mall_settlement_items` 表 SHALL 存储结算单关联订单明细（迁移 000011），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `settlement_id` | bigint | 0 | 否 | FK mall_settlements.id |
-| `draw_order_id` | bigint | 0 | 否 | FK mall_draw_orders.id，全局唯一索引（一订单只可被结算一次） |
-| `amount` | decimal(10,2) | 0.00 | 否 | 该订单销售额（=draw_order.price） |
-| `commission_amount` | decimal(10,2) | 0.00 | 否 | 该订单分摊的平台手续费 |
-| `payout_amount` | decimal(10,2) | 0.00 | 否 | 该订单分摊的应付供应商 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+#### Scenario: 迁移 000011 建立的结算明细表结构
+- **WHEN** 迁移 000011 执行完成
+- **THEN** `mall_settlement_items` 具有下列字段：
 
-索引：`(settlement_id)`, `(draw_order_id) UK`
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `settlement_id` | bigint | 0 | 否 | FK mall_settlements.id |
+  | `draw_order_id` | bigint | 0 | 否 | FK mall_draw_orders.id，全局唯一索引（一订单只可被结算一次） |
+  | `amount` | decimal(10,2) | 0.00 | 否 | 该订单销售额（=draw_order.price） |
+  | `commission_amount` | decimal(10,2) | 0.00 | 否 | 该订单分摊的平台手续费 |
+  | `payout_amount` | decimal(10,2) | 0.00 | 否 | 该订单分摊的应付供应商 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+
+- **AND** 建立索引 `(settlement_id)` 与 `(draw_order_id)` 唯一索引
 
 #### Scenario: One draw order in exactly one settlement
 - **WHEN** draw_order.id=100 被 settlement.id=5 包含
@@ -611,25 +649,29 @@ admin SHALL 能通过 `POST /api/v1/admin/settlements/:id/mark_paid` 标记结�
 
 ### Requirement: mall_seckill_activities field schema
 
-`mall_seckill_activities` 表 SHALL 存储秒杀活动主体（迁移 000012）：
+`mall_seckill_activities` 表 SHALL 存储秒杀活动主体（迁移 000012），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
-| `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
-| `seckill_price` | decimal(10,2) | 0.00 | 否 | 秒杀价 |
-| `total_stock` | int | 0 | 否 | 秒杀总名额（用于初始化 Redis 库存） |
-| `per_user_limit` | int | 1 | 否 | 每用户限购数量 |
-| `start_at` | datetime(3) | now(3) | 否 | 活动开始时间 |
-| `end_at` | datetime(3) | now(3) | 否 | 活动结束时间 |
-| `status` | varchar(16) | 'active' | 否 | active / disabled |
-| `redis_initialized` | tinyint(1) | 0 | 否 | Redis 库存是否已初始化 |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
-| `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+#### Scenario: 迁移 000012 建立的秒杀活动表结构
+- **WHEN** 迁移 000012 执行完成
+- **THEN** `mall_seckill_activities` 具有下列字段：
 
-索引：`(status, start_at, end_at)` —— 查"当前生效的秒杀活动"
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `supplier_id` | bigint | 0 | 否 | FK mall_suppliers.id |
+  | `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
+  | `seckill_price` | decimal(10,2) | 0.00 | 否 | 秒杀价 |
+  | `total_stock` | int | 0 | 否 | 秒杀总名额（用于初始化 Redis 库存） |
+  | `per_user_limit` | int | 1 | 否 | 每用户限购数量 |
+  | `start_at` | datetime(3) | now(3) | 否 | 活动开始时间 |
+  | `end_at` | datetime(3) | now(3) | 否 | 活动结束时间 |
+  | `status` | varchar(16) | 'active' | 否 | active / disabled |
+  | `redis_initialized` | tinyint(1) | 0 | 否 | Redis 库存是否已初始化 |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `updated_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+  | `deleted_at` | datetime(3) | NULL | 是 | 软删除 |
+
+- **AND** 建立索引 `(status, start_at, end_at)`，供查询"当前生效的秒杀活动"
 
 #### Scenario: redis_initialized starts as false on creation
 - **WHEN** 供应商创建 seckill 活动，total_stock=100，per_user_limit=1
@@ -688,25 +730,28 @@ Redis 段任一步失败时，已创建的 DB 行 MUST 被**回滚清除（真�
 
 ### Requirement: mall_stock_deduction_log field schema
 
-`mall_stock_deduction_log` 表 SHALL 存储秒杀路径下的库存扣减记录（迁移 000012）：
+`mall_stock_deduction_log` 表 SHALL 存储秒杀路径下的库存扣减记录（迁移 000012），字段与索引定义见 scenario。
 
-| 字段 | 类型 | 默认值 | 可空 | 说明 |
-|---|---|---|---|---|
-| `id` | bigint | auto | 否 | 主键 |
-| `seckill_id` | bigint | 0 | 否 | FK mall_seckill_activities.id |
-| `user_id` | bigint | 0 | 否 | FK mall_users.id |
-| `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
-| `card_id` | bigint | 0 | 否 | FK mall_cards.id（抽中的卡） |
-| `rarity` | varchar(8) | 'N' | 否 | 抽中等级 |
-| `snapshot_name` | varchar(100) | "" | 否 | 卡名快照 |
-| `snapshot_image` | varchar(255) | "" | 否 | 卡图快照 |
-| `deducted_at` | datetime(3) | now(3) | 否 | 扣减时间 |
-| `synced_to_pool_at` | datetime(3) | NULL | 是 | 异步对账完成时间（NULL = 未对账） |
-| `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+#### Scenario: 迁移 000012 建立的扣减日志表结构
+- **WHEN** 迁移 000012 执行完成
+- **THEN** `mall_stock_deduction_log` 具有下列字段：
 
-索引：
-- `(synced_to_pool_at, deducted_at)` —— 异步任务扫"待对账"
-- `(seckill_id)` —— 按活动聚合
+  | 字段 | 类型 | 默认值 | 可空 | 说明 |
+  |---|---|---|---|---|
+  | `id` | bigint | auto | 否 | 主键 |
+  | `seckill_id` | bigint | 0 | 否 | FK mall_seckill_activities.id |
+  | `user_id` | bigint | 0 | 否 | FK mall_users.id |
+  | `blind_box_id` | bigint | 0 | 否 | FK mall_blind_boxes.id |
+  | `card_id` | bigint | 0 | 否 | FK mall_cards.id（抽中的卡） |
+  | `rarity` | varchar(8) | 'N' | 否 | 抽中等级 |
+  | `snapshot_name` | varchar(100) | "" | 否 | 卡名快照 |
+  | `snapshot_image` | varchar(255) | "" | 否 | 卡图快照 |
+  | `deducted_at` | datetime(3) | now(3) | 否 | 扣减时间 |
+  | `synced_to_pool_at` | datetime(3) | NULL | 是 | 异步对账完成时间（NULL = 未对账） |
+  | `created_at` | datetime(3) | now(3) | 否 | GORM 自动 |
+
+- **AND** 建立索引 `(synced_to_pool_at, deducted_at)`，供异步任务扫"待对账"
+- **AND** 建立索引 `(seckill_id)`，供按活动聚合
 
 #### Scenario: Seckill draw writes deduction log
 - **WHEN** 用户秒杀下单成功
@@ -720,19 +765,23 @@ Redis 段任一步失败时，已创建的 DB 行 MUST 被**回滚清除（真�
 
 ### Requirement: Seckill draw flow (Redis pre-deduct + transaction + rollback)
 
-秒杀下单接口 SHALL 按 design D15 流程执行：
+秒杀下单接口 SHALL 按 design D15 的「Redis 预扣 + MySQL 事务 + 双向回滚」流程执行，步骤清单见 scenario。
 
-1. 预校验：seckill.status='active' AND redis_initialized=true AND NOW() IN [start_at, end_at)
-2. 限购校验：`INCR seckill:user_bought:{sid}:{uid}`，> per_user_limit → DECR 回滚 → `ErrUserLimitExceeded`
-3. Redis 库存预扣：`DECR seckill:stock:{sid}`，< 0 → INCR + DECR user_bought 回滚 → `ErrSoldOut`
-4. MySQL 事务（轻量）：
-   - 抽卡算法（同 D3）：SELECT pool items FOR UPDATE + rand + UPDATE stock -= 1
-   - INSERT mall_stock_deduction_log
-   - INSERT mall_draw_orders (source='seckill')
-   - INSERT mall_draw_order_items (snapshot_*)
-   - UPDATE mall_users balance -= seckill_price（条件更新）
-   - UPDATE mall_suppliers balance += seckill_price + ledger（结算副作用）
-5. 失败：ROLLBACK + Redis INCR 回滚 + DECR user_bought 回滚
+#### Scenario: 秒杀下单的固定步骤序列
+- **WHEN** 用户请求秒杀下单
+- **THEN** 依次执行下列步骤：
+
+  1. 预校验：seckill.status='active' AND redis_initialized=true AND NOW() IN [start_at, end_at)
+  2. 限购校验：`INCR seckill:user_bought:{sid}:{uid}`，> per_user_limit → DECR 回滚 → `ErrUserLimitExceeded`
+  3. Redis 库存预扣：`DECR seckill:stock:{sid}`，< 0 → INCR + DECR user_bought 回滚 → `ErrSoldOut`
+  4. MySQL 事务（轻量）：
+     - 抽卡算法（同 D3）：SELECT pool items FOR UPDATE + rand + UPDATE stock -= 1
+     - INSERT mall_stock_deduction_log
+     - INSERT mall_draw_orders (source='seckill')
+     - INSERT mall_draw_order_items (snapshot_*)
+     - UPDATE mall_users balance -= seckill_price（条件更新）
+     - UPDATE mall_suppliers balance += seckill_price + ledger（结算副作用）
+  5. 失败：ROLLBACK + Redis INCR 回滚 + DECR user_bought 回滚
 
 #### Scenario: Seckill success returns card
 - **WHEN** 用户秒杀下单，Redis 库存充足，事务成功
@@ -1004,30 +1053,31 @@ State 接口 SHALL 包含 `Name()` / `CanTransitionTo(target)` / `OnEnter(ctx, o
 
 ### Requirement: Draw validation chain (responsibility chain)
 
-`internal/domain/chain/` SHALL 提供责任链编排：
-
-```go
-type Validator interface {
-    Name() string
-    Validate(ctx context.Context, input *DrawInput) error
-}
-
-type Chain struct{ validators []Validator }
-
-func (c *Chain) Validate(ctx, input) error  // 顺序执行，任一 err 终止
-```
-
-MVP SHALL 提供以下 Validator：
-
-| Validator | 检查项 | 失败错误码 |
-|---|---|---|
-| UserActiveCheck | mall_users.status=1 | ErrUserDisabled (403) |
-| BlindBoxBuyableCheck | blind_box.status=active AND on_sale AND supplier.status=active | ErrBlindBoxNotBuyable (404) |
-| TimeWindowCheck | 普通活动 NOW() IN [start_at, end_at) / 秒杀活动同理 | ErrNotInTimeWindow (409) |
-| UserLimitCheck（秒杀） | Redis INCR seckill:user_bought <= per_user_limit | ErrUserLimitExceeded (429) |
-| BalanceCheck | user.balance >= actual_price | ErrInsufficientBalance (402) |
-
+`internal/domain/chain/` SHALL 提供责任链编排，用于抽卡前的串行校验；接口签名与 Validator 清单见 scenario。
 Chain SHALL 在事务外执行（不进事务），校验失败 fast return 不浪费 DB 连接。
+
+#### Scenario: 责任链接口与 MVP Validator 清单
+- **WHEN** 抽卡请求进入 service 层
+- **THEN** 使用下列接口与被编排的 Validator：
+
+  ```go
+  type Validator interface {
+      Name() string
+      Validate(ctx context.Context, input *DrawInput) error
+  }
+
+  type Chain struct{ validators []Validator }
+
+  func (c *Chain) Validate(ctx, input) error  // 顺序执行，任一 err 终止
+  ```
+
+  | Validator | 检查项 | 失败错误码 |
+  |---|---|---|
+  | UserActiveCheck | mall_users.status=1 | ErrUserDisabled (403) |
+  | BlindBoxBuyableCheck | blind_box.status=active AND on_sale AND supplier.status=active | ErrBlindBoxNotBuyable (404) |
+  | TimeWindowCheck | 普通活动 NOW() IN [start_at, end_at) / 秒杀活动同理 | ErrNotInTimeWindow (409) |
+  | UserLimitCheck（秒杀） | Redis INCR seckill:user_bought <= per_user_limit | ErrUserLimitExceeded (429) |
+  | BalanceCheck | user.balance >= actual_price | ErrInsufficientBalance (402) |
 
 #### Scenario: All checks pass
 - **WHEN** 抽卡请求，所有 Validator 顺序通过
@@ -1049,33 +1099,36 @@ Chain SHALL 在事务外执行（不进事务），校验失败 fast return 不�
 
 ### Requirement: Hotspot cache (no TTL + logical time + distributed lock + async refresh)
 
-`internal/infra/cache/hotspot/` SHALL 提供热点数据缓存：
+`internal/infra/cache/hotspot/` SHALL 提供「无 TTL + 逻辑时间 + 分布式锁 + 异步刷新」的热点数据缓存，接口、算法与 key 清单见 scenario。
 
-```go
-type HotspotLoader func(ctx context.Context, key string) (data any, err error)
+#### Scenario: 接口定义与 Redis 算法
+- **WHEN** 调用方使用热点缓存
+- **THEN** 使用下列接口：
 
-type HotspotCache interface {
-    Get(ctx context.Context, key string, loader HotspotLoader, staleAfter time.Duration) (data any, err error)
-    Invalidate(ctx context.Context, key string) error
-}
-```
+  ```go
+  type HotspotLoader func(ctx context.Context, key string) (data any, err error)
 
-**算法**（Redis 实现）：
-1. `GET key` → val；nil → 冷启动 → loader 查 DB → `SET key val EX 0`（不过期）→ 返回
-2. val 不 nil → 解析 `RefreshedAt`；now - RefreshedAt > staleAfter → 抢分布式锁
-3. 抢到锁 → `go` 异步 loader + SET；未抢到 → 直接返回老数据
-4. 不管抢没抢到，都返回当前 val（老数据）
+  type HotspotCache interface {
+      Get(ctx context.Context, key string, loader HotspotLoader, staleAfter time.Duration) (data any, err error)
+      Invalidate(ctx context.Context, key string) error
+  }
+  ```
 
-**分布式锁**：`SET lock:{key} {uuid} NX EX 5`；释放用 Lua 脚本只删自己的锁。
+- **AND** Redis 实现按下列算法执行：
 
-**singleflight 合并**：冷启动路径用 `golang.org/x/sync/singleflight.Do`，避免 N 个并发请求同时打 DB。
+  1. `GET key` → val；nil → 冷启动 → loader 查 DB → `SET key val EX 0`（不过期）→ 返回
+  2. val 不 nil → 解析 `RefreshedAt`；now - RefreshedAt > staleAfter → 抢分布式锁
+  3. 抢到锁 → `go` 异步 loader + SET；未抢到 → 直接返回老数据
+  4. 不管抢没抢到，都返回当前 val（老数据）
 
-**应用场景**：
+- **AND** 分布式锁用 `SET lock:{key} {uuid} NX EX 5`，释放用 Lua 脚本只删自己的锁
+- **AND** 冷启动路径用 `golang.org/x/sync/singleflight.Do` 合并，避免 N 个并发请求同时打 DB
+- **AND** 应用场景如下：
 
-| Key 模式 | staleAfter | 用途 |
-|---|---|---|
-| `hotspot:blindbox:{id}` | 30s | 热门盲盒详情 |
-| `hotspot:feed:home` | 60s | 首页 feed |
+  | Key 模式 | staleAfter | 用途 |
+  |---|---|---|
+  | `hotspot:blindbox:{id}` | 30s | 热门盲盒详情 |
+  | `hotspot:feed:home` | 60s | 首页 feed |
 
 #### Scenario: Cold start loads from DB
 - **WHEN** 首次请求 `hotspot:blindbox:1`，Redis 无该 key

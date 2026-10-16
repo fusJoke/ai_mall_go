@@ -28,7 +28,7 @@ The system MUST expose `GET /admin/rule/list` that returns a paginated list of m
 
 ### Requirement: Admin can create a new menu rule
 
-The system MUST expose `POST /admin/rule/create` accepting a JSON body with at least `title` and `name`. The system MUST reject requests where `title` is empty or `name` is empty. The system MUST reject requests where `type` is not one of `dir` / `menu` / `node`, where `open_type` (when present) is not one of `tab` / `link` / `iframe`, and where `extend` is not one of `none` / `add_route_only` / `add_menu_only`. The system MUST reject requests where `pid` refers to a non-existent or soft-deleted rule. On success the response MUST be `200` with the created rule including the server-assigned `id` and timestamp fields.
+The system MUST expose `POST /admin/rule/create` accepting a JSON body with at least `title` and `name`. The system MUST reject a request whose `title` or `name` is empty, and MUST reject any enum or `pid` value that violates the constraints listed in the scenarios below. On success the response MUST be `200` with the created rule including the server-assigned `id` and timestamp fields.
 
 #### Scenario: Successful creation of a top-level menu rule
 - **WHEN** an authenticated admin posts `{pid: 0, type: "menu", title: "用户管理", name: "user"}` to `/admin/rule/create`
@@ -39,7 +39,11 @@ The system MUST expose `POST /admin/rule/create` accepting a JSON body with at l
 - **THEN** the response is `4xx` with code `rule.create.invalid_input` and the row is not inserted
 
 #### Scenario: Unknown type rejected
-- **WHEN** an authenticated admin posts `{title: "x", name: "x", type: "unknown"}` to `/admin/rule/create`
+- **WHEN** an authenticated admin posts `{title: "x", name: "x", type: "unknown"}` to `/admin/rule/create`, where `type` MUST be one of `dir` / `menu` / `node`
+- **THEN** the response is `4xx` with code `rule.create.invalid_input` and the row is not inserted
+
+#### Scenario: Invalid open_type or extend rejected
+- **WHEN** an authenticated admin posts a body whose `open_type` is not one of `tab` / `link` / `iframe`, or whose `extend` is not one of `none` / `add_route_only` / `add_menu_only`
 - **THEN** the response is `4xx` with code `rule.create.invalid_input` and the row is not inserted
 
 #### Scenario: PID references non-existent rule
@@ -116,7 +120,11 @@ The system MUST expose `GET /admin/rule/all` returning the full list of enabled 
 
 ### Requirement: Management UI is available at /admin/rule
 
-The system MUST expose a Vue route `/admin/rule` under the admin layout that renders a single page (`web/src/views/admin/rule/index.vue`) containing: (1) a paginated table listing menu rules with search input on `title` and `name`; (2) a "create" button that opens a dialog with form fields `pid` (tree-select), `type`, `title`, `name`, `path`, `icon`, `open_type`, `url`, `component`, `keepalive`, `extend`, `remark`, `weigh`, `status`; (3) per-row actions for edit, toggle-status, delete; (4) batch delete via selected rows. The page MUST call the JSON endpoints above. The page MUST use the existing i18n keys with English fallback.
+The system MUST expose a Vue route `/admin/rule` under the admin layout rendering a single page (`web/src/views/admin/rule/index.vue`) that provides list/search, create, edit, toggle-status, delete, and batch-delete against the JSON endpoints above. The page MUST use the existing i18n keys with English fallback.
+
+#### Scenario: The page exposes the full CRUD surface
+- **WHEN** a logged-in admin opens `/admin/rule`
+- **THEN** the page provides (1) a paginated table listing menu rules with a search input on `title` and `name`; (2) a "create" button that opens a dialog with form fields `pid` (tree-select), `type`, `title`, `name`, `path`, `icon`, `open_type`, `url`, `component`, `keepalive`, `extend`, `remark`, `weigh`, `status`; (3) per-row actions for edit, toggle-status, delete; (4) batch delete via selected rows
 
 #### Scenario: Visiting /admin/rule
 - **WHEN** a logged-in admin opens `/admin/rule`
