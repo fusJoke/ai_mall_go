@@ -61,6 +61,11 @@ func (m *orderDrawOrderRepo) ListByUser(c *gin.Context, uid int64, opts reposito
 func (m *orderDrawOrderRepo) UpdateStatus(c *gin.Context, id int64, s mall.MallDrawOrderStatus) error {
 	return nil
 }
+
+// UpdateStatusCAS 为 P2-2 新增接口方法；订单查询域不使用，no-op stub。
+func (m *orderDrawOrderRepo) UpdateStatusCAS(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error) {
+	return 0, nil
+}
 func (m *orderDrawOrderRepo) ListItemsByOrderID(c *gin.Context, orderID int64) ([]mall.MallDrawOrderItem, error) {
 	m.listItemsByOrderCalls++
 	if m.listItemsByOrderFunc != nil {

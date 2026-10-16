@@ -327,18 +327,20 @@ func (m *drawUserRepo) Delete(c *gin.Context, id int64) error      { return nil 
 var _ userRepo.UserRepository = (*drawUserRepo)(nil)
 
 type drawOrderRepo struct {
-	createOrderFunc  func(c *gin.Context, order *mall.MallDrawOrder) error
-	createItemsFunc  func(c *gin.Context, items []mall.MallDrawOrderItem) error
-	getByOrderNoFunc func(c *gin.Context, no string) (*mall.MallDrawOrder, error)
-	updateStatusFunc func(c *gin.Context, id int64, s mall.MallDrawOrderStatus) error
+	createOrderFunc     func(c *gin.Context, order *mall.MallDrawOrder) error
+	createItemsFunc     func(c *gin.Context, items []mall.MallDrawOrderItem) error
+	getByOrderNoFunc    func(c *gin.Context, no string) (*mall.MallDrawOrder, error)
+	updateStatusFunc    func(c *gin.Context, id int64, s mall.MallDrawOrderStatus) error
+	updateStatusCASFunc func(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error)
 
-	createOrderCalls  int
-	createItemsCalls  int
-	updateStatusCalls int
-	lastOrder         *mall.MallDrawOrder
-	lastItems         []mall.MallDrawOrderItem
-	statusUpdates     []mall.MallDrawOrderStatus
-	orderIDCounter    int64
+	createOrderCalls     int
+	createItemsCalls     int
+	updateStatusCalls    int
+	updateStatusCASCalls int
+	lastOrder            *mall.MallDrawOrder
+	lastItems            []mall.MallDrawOrderItem
+	statusUpdates        []mall.MallDrawOrderStatus
+	orderIDCounter       int64
 }
 
 func (m *drawOrderRepo) GetByID(c *gin.Context, id int64) (*mall.MallDrawOrder, error) {
@@ -370,6 +372,16 @@ func (m *drawOrderRepo) UpdateStatus(c *gin.Context, id int64, s mall.MallDrawOr
 		return m.updateStatusFunc(c, id, s)
 	}
 	return nil
+}
+
+// UpdateStatusCAS 是 P2-2 新增的 CAS 形态；抽卡事务内仍走无 CAS 的 UpdateStatus
+// （同事务内无并发写者），因此这里只做接口满足 + 计数，不参与现有断言。
+func (m *drawOrderRepo) UpdateStatusCAS(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error) {
+	m.updateStatusCASCalls++
+	if m.updateStatusCASFunc != nil {
+		return m.updateStatusCASFunc(c, id, from, to)
+	}
+	return 1, nil
 }
 func (m *drawOrderRepo) ListItemsByOrderID(c *gin.Context, id int64) ([]mall.MallDrawOrderItem, error) {
 	return nil, nil
@@ -598,6 +610,7 @@ func (nilSafeSeckillRepo) Create(c *gin.Context, s *mall.MallSeckillActivity) (i
 	return 0, nil
 }
 func (nilSafeSeckillRepo) Update(c *gin.Context, s *mall.MallSeckillActivity) error { return nil }
+func (nilSafeSeckillRepo) Delete(c *gin.Context, id int64) error                    { return nil }
 func (nilSafeSeckillRepo) MarkRedisInitialized(c *gin.Context, id int64) error      { return nil }
 func (nilSafeSeckillRepo) ListActive(c *gin.Context, now time.Time, opts repository.ListOptions) ([]mall.MallSeckillActivity, int64, error) {
 	return nil, 0, nil

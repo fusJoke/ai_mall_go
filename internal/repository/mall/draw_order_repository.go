@@ -35,7 +35,20 @@ type DrawOrderRepository interface {
 	ListByUser(c *gin.Context, userID int64, opts repository.ListOptions) (items []mall.MallDrawOrder, total int64, err error)
 
 	// UpdateStatus 仅写 Status 列（订单状态机迁移专用）。
+	//
+	// 无 CAS：仅适用于「同事务内刚建单后的初始化流转」——该事务内不存在其他写者。
+	// 需要跨请求推进状态（支付回调 / 自动取消 / 结算）时**必须**改用 UpdateStatusCAS，
+	// 否则「先读再写」会让两个并发流程都通过前置校验、双双写成功（OCR 审查 P2-2）。
 	UpdateStatus(c *gin.Context, id int64, status mall.MallDrawOrderStatus) error
+
+	// UpdateStatusCAS 条件推进状态：WHERE id=? AND status=from → SET status=to。
+	//
+	// 返回 RowsAffected：0 = 当前状态不是 from（并发抢先 / 非法流转 / 行不存在），
+	// 由调用方裁决（通常映射成 409 冲突或幂等短路），不要当成错误吞掉。
+	//
+	// 形态与 settlement_bill_repository.UpdateStatus 一致 —— 那是本仓库已验证过的
+	// CAS 写法，此处推广到订单域。
+	UpdateStatusCAS(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error)
 
 	// --- 抽卡算法 / 结算相关 ---
 
@@ -120,11 +133,25 @@ func (r *gormDrawOrderRepository) ListByUser(c *gin.Context, userID int64, opts 
 }
 
 // UpdateStatus 仅写 Status 列。
+//
+// 无 CAS，仅供同事务内的初始化流转使用；跨请求推进状态请用 UpdateStatusCAS。
 func (r *gormDrawOrderRepository) UpdateStatus(c *gin.Context, id int64, status mall.MallDrawOrderStatus) error {
 	return repository.DB(c).
 		Model(&mall.MallDrawOrder{}).
 		Where("id = ?", id).
 		Update("status", status).Error
+}
+
+// UpdateStatusCAS 条件推进状态：WHERE id=? AND status=from → SET status=to。
+//
+// 单条 UPDATE 内完成「校验 + 写入」，靠 DB 行锁串行化，因此并发下只有一个
+// 调用者能拿到 RowsAffected = 1；先读后写的两步写法做不到这一点。
+func (r *gormDrawOrderRepository) UpdateStatusCAS(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error) {
+	res := repository.DB(c).
+		Model(&mall.MallDrawOrder{}).
+		Where("id = ? AND status = ?", id, from).
+		Update("status", to)
+	return res.RowsAffected, res.Error
 }
 
 // ListItemsByOrderID 拉某订单的明细。

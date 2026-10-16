@@ -130,6 +130,54 @@ func TestDrawOrderRepository_UpdateStatus(t *testing.T) {
 	}
 }
 
+// TestDrawOrderRepository_UpdateStatusCAS 锁定 OCR 审查 P2-2：
+// 跨请求推进状态必须用 CAS（WHERE id=? AND status=from），不能先读后写。
+//
+// 断言 SQL 里带 status 条件，且 RowsAffected 原样透出（0 = 并发抢先 / 非法流转）。
+func TestDrawOrderRepository_UpdateStatusCAS(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `mall_draw_orders` SET `status`=?,`updated_at`=? WHERE (id = ? AND status = ?) AND `mall_draw_orders`.`deleted_at` IS NULL")).
+		WithArgs("drawn", sqlmock.AnyArg(), int64(7), "paid").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	rows, err := NewDrawOrderRepository().UpdateStatusCAS(c, 7, mall.OrderStatusPaid, mall.OrderStatusDrawn)
+	if err != nil {
+		t.Fatalf("UpdateStatusCAS: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("RowsAffected = %d, want 1", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
+// TestDrawOrderRepository_UpdateStatusCAS_NoMatch 影响 0 行不是错误：
+// 调用方据此判定「状态已被别人改过」，走幂等 / 冲突分支。
+func TestDrawOrderRepository_UpdateStatusCAS_NoMatch(t *testing.T) {
+	c, mock := newMockContext(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE")).
+		WithArgs("drawn", sqlmock.AnyArg(), int64(7), "paid").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	rows, err := NewDrawOrderRepository().UpdateStatusCAS(c, 7, mall.OrderStatusPaid, mall.OrderStatusDrawn)
+	if err != nil {
+		t.Fatalf("UpdateStatusCAS: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("RowsAffected = %d, want 0", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock expectations: %v", err)
+	}
+}
+
 // TestDrawOrderRepository_ListItemsByOrderID 验证按 order_id 查明细。
 func TestDrawOrderRepository_ListItemsByOrderID(t *testing.T) {
 	c, mock := newMockContext(t)
