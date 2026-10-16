@@ -6,52 +6,69 @@ Provides a configurable, multi-driver file upload foundation so business code ca
 
 ## Requirements
 
-### Requirement: Upload configuration
+### Requirement: Upload configuration source
 
-The system SHALL load upload settings from `config/upload.yaml` (merged by viper with the existing per-file load order; `.env.yaml` may override any key). The configuration SHALL expose four knobs:
-
-- `driver`: string — name of the storage driver to use. The system SHALL reject any unknown driver name at startup.
-- `max_size`: positive integer — maximum file size in `max_size_unit`. A file larger than `max_size × max_size_unit` bytes SHALL be rejected by `Upload`.
-- `max_size_unit`: string in `{"B", "KB", "MB", "GB"}` — multiplier unit for `max_size`.
-- `suffixes`: list of strings (case-insensitive, no leading dot) — allowed file extensions. A file with an extension not in the list SHALL be rejected by `Upload`. The default list SHALL include `jpg`, `jpeg`, `png`, `gif`, `webp`, `pdf`.
-- `format`: string — storage path template. The system SHALL support the following placeholders and substitute them at upload time:
-
-| Placeholder | Substitution |
-| --- | --- |
-| `{topic}` | the value passed as the upload topic |
-| `{year}` | 4-digit current year |
-| `{mon}` | 2-digit current month |
-| `{day}` | 2-digit current day |
-| `{fileName}` | sanitized original file name |
-| `{fileSha1}` | first 16 hex characters of SHA1 of file contents |
-| `{.suffix}` | the lowercased file extension including the leading dot |
-
-Multiple placeholders MAY appear in the same template; the same placeholder MAY appear more than once. The default template SHALL be `/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}`.
+The system SHALL load upload settings from `config/upload.yaml`, merged by viper with the existing per-file load order; `.env.yaml` MAY override any key. When that file is absent the subsystem SHALL fall back to built-in defaults.
 
 #### Scenario: Default config is applied when upload.yaml is missing
 - **WHEN** the system starts up without `config/upload.yaml`
 - **THEN** the upload subsystem SHALL still function with these defaults: `driver=local`, `max_size=10`, `max_size_unit=MB`, `suffixes=["jpg","jpeg","png","gif","webp","pdf"]`, `format="/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}"`
+
+### Requirement: Upload configuration knobs
+
+The configuration SHALL expose four knobs: `driver`, `max_size`, `max_size_unit` and `suffixes`. `driver` SHALL name a registered storage driver and SHALL be rejected at startup when unknown. `max_size` SHALL be a positive integer expressed in `max_size_unit`, which SHALL be one of `B`, `KB`, `MB` or `GB`. `suffixes` SHALL list allowed extensions, case-insensitive and without a leading dot.
+
+#### Scenario: Oversized file is rejected
+- **WHEN** a file larger than `max_size × max_size_unit` bytes is uploaded
+- **THEN** `Upload` SHALL reject it
+
+#### Scenario: Disallowed suffix is rejected
+- **WHEN** a file whose extension is not in `suffixes` is uploaded
+- **THEN** `Upload` SHALL reject it
+
+#### Scenario: Default suffix whitelist
+- **WHEN** `suffixes` is not configured
+- **THEN** the whitelist SHALL be `jpg`, `jpeg`, `png`, `gif`, `webp`, `pdf`
 
 #### Scenario: Unknown driver name fails fast
 - **WHEN** `config/upload.yaml` sets `driver: "s3"` but no S3 driver is registered
 - **THEN** `upload.Init()` SHALL return an error mentioning the unknown driver name
 - **AND** the process SHALL refuse to start (cmd/serve surfaces the error)
 
+### Requirement: Upload storage path template
+
+The `format` knob SHALL be a storage path template rendered at upload time. Multiple placeholders MAY appear in the same template, and the same placeholder MAY appear more than once.
+
+#### Scenario: Default template
+- **WHEN** `format` is not configured
+- **THEN** the template SHALL be `/{topic}/{year}{mon}{day}/{fileName}{fileSha1}{.suffix}`
+
 #### Scenario: Custom format produces deterministic paths
 - **WHEN** an upload happens on 2026-09-30 with topic=`avatar`, original name=`My Photo.JPG`, content SHA1 prefix `3a7f...`, extension `jpg`
 - **THEN** the rendered storage path SHALL be `/avatar/20260930/my photo3a7f...jpg`
 
+### Requirement: Upload template placeholders
+
+The template SHALL support these placeholders:
+
+| Placeholder | Substitution |
+| --- | --- |
+| `{topic}` | the upload topic |
+| `{year}` | 4-digit current year |
+| `{mon}` | 2-digit current month |
+| `{day}` | 2-digit current day |
+| `{fileName}` | sanitized original file name |
+| `{fileSha1}` | first 16 hex characters of the content SHA1 |
+| `{.suffix}` | lowercased extension, leading dot included |
+
+#### Scenario: Each placeholder occurrence is substituted independently
+- **WHEN** a template contains `{topic}`, `{year}` and two occurrences of `{.suffix}`
+- **THEN** every occurrence SHALL be substituted with its own value in place
+- **AND** placeholders absent from the template SHALL NOT be emitted
+
 ### Requirement: Driver interface contract
 
-The system SHALL define a `Driver` interface in the upload package with exactly five methods:
-
-- `Save(ctx context.Context, content io.Reader, storedPath string) error` — persist the bytes at the driver-specific location identified by `storedPath` (the rendered template); create any missing parent directories.
-- `Delete(ctx context.Context, storedPath string) error` — remove the stored file; idempotent (no error when the file is already absent).
-- `Url(storedPath string) string` — return the externally addressable URL for accessing the file (for `local` driver, the public-prefixed HTTP path).
-- `Exists(storedPath string) bool` — return whether the file currently exists in storage.
-- `FullPath(storedPath string) string` — return the absolute filesystem path on disk (for `local` driver); for non-local drivers this SHALL be the canonical storage identifier.
-
-The system SHALL refuse to start `upload.Init()` if the configured driver name does not match any registered driver.
+The system SHALL define a `Driver` interface in the upload package with exactly five methods: `Save(ctx, content, storedPath) error`, `Delete(ctx, storedPath) error`, `Url(storedPath) string`, `Exists(storedPath) bool` and `FullPath(storedPath) string`. `upload.Init()` SHALL refuse to start when the configured driver name matches no registered driver.
 
 #### Scenario: Local driver Save creates missing parent directories
 - **WHEN** `Save` is invoked with a `storedPath` whose parent directory does not exist
@@ -66,22 +83,25 @@ The system SHALL refuse to start `upload.Init()` if the configured driver name d
 - **WHEN** the configured public URL prefix is `/uploads` and `storedPath` is `avatar/20260930/x3a7f.jpg`
 - **THEN** `Url(storedPath)` SHALL return `/uploads/avatar/20260930/x3a7f.jpg`
 
+#### Scenario: Local driver Exists reports on-disk presence
+- **WHEN** `Exists(storedPath)` is called for a path that is and is not present on disk
+- **THEN** it SHALL return `true` and `false` respectively
+
 #### Scenario: Local driver FullPath joins base dir with storedPath
 - **WHEN** the configured base directory is `/var/data/uploads` and `storedPath` is `avatar/20260930/x3a7f.jpg`
 - **THEN** `FullPath(storedPath)` SHALL return `/var/data/uploads/avatar/20260930/x3a7f.jpg`
 
 ### Requirement: Service.Upload validates and persists
 
-The system SHALL expose a `Service.Upload(input *UploadInput) (*UploadResult, error)` that, in order:
+The system SHALL expose `Service.Upload(input *UploadInput) (*UploadResult, error)`, which validates the input, enforces the size cap and suffix whitelist, computes the content SHA1, renders the `format` template, persists the bytes through the configured driver, and returns the stored path, URL, byte count and suffix.
 
-1. Returns `ErrInvalidInput` if `input == nil`, `input.Reader == nil`, or `input.Topic == ""`.
-2. Returns `ErrInvalidInput` if `input.OriginalName == ""`.
-3. Reads up to `max_size × max_size_unit` bytes from `input.Reader`; if the read exceeds the cap, returns `ErrFileTooLarge`. The byte counter SHALL count actual bytes consumed, not pre-declared sizes.
-4. Determines the lowercased extension from `input.OriginalName`; if absent or not in `suffixes`, returns `ErrInvalidSuffix`.
-5. Computes SHA1 over the bytes read in step 3.
-6. Renders the configured `format` template with the substitution table above.
-7. Calls `driver.Save` with the rendered path and a reader over the buffered bytes (rewound to the start).
-8. Returns `&UploadResult{StoredPath: rendered, Url: driver.Url(rendered), Size: byteCount, Suffix: ext}`.
+#### Scenario: Nil input is rejected
+- **WHEN** `Upload` is called with `nil`, with `Reader == nil`, or with an empty `Topic`
+- **THEN** it SHALL return `ErrInvalidInput` without touching the driver
+
+#### Scenario: Empty original name is rejected
+- **WHEN** `Upload` is called with an empty `OriginalName`
+- **THEN** it SHALL return `ErrInvalidInput`
 
 #### Scenario: File too large is rejected before disk write
 - **WHEN** a 12 MB file is uploaded against a `max_size=10 MB` configuration
@@ -98,6 +118,10 @@ The system SHALL expose a `Service.Upload(input *UploadInput) (*UploadResult, er
 - **THEN** the returned `UploadResult.Url` SHALL be the driver's `Url` of the rendered path
 - **AND** the returned `UploadResult.StoredPath` SHALL match the rendered template output
 - **AND** `UploadResult.Size` SHALL equal 2 MB
+
+#### Scenario: Byte counter reflects consumed bytes
+- **WHEN** the reader yields more bytes than any pre-declared size
+- **THEN** the size cap SHALL be enforced against the actual bytes consumed
 
 ### Requirement: File suffix and image detection helpers
 

@@ -40,7 +40,7 @@ The system MUST make the `ag-upload` component a two-way bound form field throug
 
 ### Requirement: agUpload uploads files through the shared fileUpload API
 
-The system MUST post each selected file to the server via the `fileUpload` function exported from `web/src/api/common.ts`. The function MUST accept a `FormData` payload, optional extra params, and an `onUploadProgress` callback. The component MUST forward its optional `driver` prop (defaulting to `local`) as a `driver` extra param alongside the existing `force_local` param, letting the server decide the actual storage driver (falling back to local storage when the driver is unconfigured). The function MUST return a promise that resolves with the server response; if the response code is non-zero, the component MUST mark the file as failed and remove it from the visible list. If the file exceeds the configured maximum size or has a disallowed MIME type, the component MUST NOT submit the request and MUST surface a notification.
+The system MUST post each selected file through the `fileUpload` function exported from `web/src/api/common.ts`, forwarding the component's `driver` prop (default `local`) as an extra param. The function MUST accept a `FormData` payload, optional extra params and an `onUploadProgress` callback, and MUST resolve with the server response. Failures and client-side pre-checks SHALL surface to the user rather than silently dropping the file.
 
 #### Scenario: Successful upload
 
@@ -141,7 +141,16 @@ The system MUST NOT contain any of the `ba` prefix references carried over from 
 
 ### Requirement: agUpload is demonstrated at /agInput
 
-The system MUST register a route at `/agInput` under the admin layout that renders a single page (`web/src/views/agInput/index.vue`) containing one `<ag-upload>` per supported type (`image`, `images`, `file`, `files`) with local model state for manual testing. The page MUST also render an upload-driver selector (example data: local / aliyun / tencent / qiniu cards from `web/src/mock/uploadDrivers.ts`) whose selected value is bound to the `driver` prop of all four upload areas, and MUST show the current model value of each upload area.
+The system MUST register a route at `/agInput` under the admin layout, rendering `web/src/views/agInput/index.vue` as a manual-testing playground: one `<ag-upload>` per supported type with local model state, plus an upload-driver selector whose selected value is bound to the `driver` prop of every upload area.
+
+#### Scenario: All four upload types render with visible model state
+- **WHEN** the page is opened
+- **THEN** one `<ag-upload>` SHALL render for each of `image`, `images`, `file` and `files`
+- **AND** the current model value of each area SHALL be displayed
+
+#### Scenario: Driver selector options come from the mock catalogue
+- **WHEN** the upload-driver selector is opened
+- **THEN** it SHALL offer the local / aliyun / tencent / qiniu cards from `web/src/mock/uploadDrivers.ts`
 
 #### Scenario: Visiting /agInput
 

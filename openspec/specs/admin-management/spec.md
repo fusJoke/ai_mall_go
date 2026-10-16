@@ -135,7 +135,14 @@ The system MUST strip the `password` field from every JSON response that returns
 
 ### Requirement: Management UI is available at /admin/manager
 
-The system MUST expose a Vue route `/admin/manager` under the admin layout that renders a single page (`web/src/views/admin/manager/index.vue`) containing: (1) a paginated table listing admin accounts with search input; (2) a "create" button that opens a dialog with form fields `username`, `nickname`, `email`, `mobile`, `avatar`, `password`, `bio`, `status`; (3) per-row actions for edit, change-password, toggle-status, unlock, delete; (4) batch delete via selected rows. The page MUST call the JSON endpoints above. The page MUST use the existing i18n keys with English fallback.
+The system MUST expose a Vue route `/admin/manager` under the admin layout, rendering `web/src/views/admin/manager/index.vue`. The page MUST call the JSON endpoints above and MUST use the existing i18n keys with English fallback.
+
+#### Scenario: Page exposes the full CRUD surface
+- **WHEN** the page is rendered
+- **THEN** it SHALL contain a paginated, searchable table of admin accounts
+- **AND** a create button opening a dialog with the fields `username`, `nickname`, `email`, `mobile`, `avatar`, `password`, `bio` and `status`
+- **AND** per-row actions for edit, change-password, toggle-status, unlock and delete
+- **AND** batch delete driven by the selected rows
 
 #### Scenario: Visiting /admin/manager
 - **WHEN** a logged-in admin opens `/admin/manager`

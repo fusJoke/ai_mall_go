@@ -7,28 +7,57 @@
 
 ### Requirement: Rule field schema
 
-系统 SHALL 提供 `admin_rule` 表，包含下列字段，类型与默认值如下：
+系统 SHALL 提供 `admin_rule` 表，其标识与路由字段如下：
 
 | 字段 | 类型 | 默认值 | 可空 | 说明 |
 |---|---|---|---|---|
 | `id` | int UNSIGNED | auto increment | 否 | 主键 |
 | `pid` | int UNSIGNED | 0 | 否 | 上级规则 id |
-| `type` | varchar(16) | 'menu' | 否 | 规则类别，仅取 `dir` / `menu` / `node` |
+| `type` | varchar(16) | 'menu' | 否 | 规则类别：`dir` / `menu` / `node` |
 | `title` | varchar(50) | '' | 否 | 规则标题 |
 | `name` | varchar(50) | '' | 否 | 规则名（英文标识 / 权限点 key） |
 | `path` | varchar(100) | '' | 否 | 前端路由路径 |
 | `icon` | varchar(50) | '' | 否 | 图标名 |
-| `open_type` | varchar(16) | NULL | 是 | 打开方式，仅取 `tab` / `link` / `iframe` |
+
+#### Scenario: New rule with minimal fields
+- **WHEN** 只提供 `pid` / `type` / `title` / `name`
+- **THEN** 其余字段 SHALL 取上表默认值
+- **AND** `id` SHALL 由数据库自增分配
+
+### Requirement: admin_rule 展示字段
+
+系统 SHALL 在 `admin_rule` 表提供下列展示字段：
+
+| 字段 | 类型 | 默认值 | 可空 | 说明 |
+|---|---|---|---|---|
+| `open_type` | varchar(16) | NULL | 是 | 打开方式：`tab` / `link` / `iframe` |
 | `url` | varchar(255) | '' | 否 | 菜单 URL |
 | `component` | varchar(100) | '' | 否 | 菜单组件路径 |
-| `keepalive` | tinyint(1) | 0 | 否 | 是否缓存路由页面（0=关闭 / 1=开启） |
-| `extend` | varchar(32) | 'none' | 否 | 扩展属性，仅取 `none` / `add_route_only` / `add_menu_only` |
+| `keepalive` | tinyint(1) | 0 | 否 | 是否缓存路由页面 |
+| `extend` | varchar(32) | 'none' | 否 | `none` / `add_route_only` / `add_menu_only` |
 | `remark` | varchar(255) | '' | 否 | 备注 |
 | `weigh` | int | 0 | 否 | 权重（列表排序） |
+
+#### Scenario: Insert with custom type and extend
+- **WHEN** 插入一行并显式给出 `type = 'node'`、`extend = 'add_route_only'`
+- **THEN** 两列 SHALL 原样保存
+- **AND** 未给出的展示字段 SHALL 取上表默认值
+
+### Requirement: admin_rule 生命周期字段
+
+系统 SHALL 在 `admin_rule` 表提供下列生命周期字段：
+
+| 字段 | 类型 | 默认值 | 可空 | 说明 |
+|---|---|---|---|---|
 | `status` | tinyint | 1 | 否 | 状态（0=禁用 / 1=启用） |
 | `created_at` | datetime(3) | now(3) | 否 | 创建时间，GORM 自动维护 |
 | `updated_at` | datetime(3) | now(3) | 否 | 更新时间，GORM 自动维护 |
 | `deleted_at` | datetime(3) | NULL | 是 | 软删除标记，GORM 自动维护 |
+
+#### Scenario: Lifecycle columns are auto-maintained
+- **WHEN** 插入或更新一行
+- **THEN** `created_at` / `updated_at` SHALL 由 GORM 自动写入
+- **AND** `deleted_at` SHALL 默认为 NULL，仅在软删除时写入
 
 #### Scenario: New rule with minimal fields
 - **WHEN** 客户端插入一条仅指定 `name='user.read'` 的记录

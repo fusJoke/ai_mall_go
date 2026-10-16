@@ -100,21 +100,17 @@
 
 ### Requirement: 转换 `admin_rule` 行到 vue-router 路由对象
 
-后端 `Init` 服务 SHALL 把每个 `AdminRule` 转换为兼容 `vue-router` `RouteRecordRaw` 的结构：
-- `path` 取自 `rule.path`
-- `name` 取自 `rule.name`（空字符串时退化为 `rule-{id}`）
-- `component` 取自 `rule.component`（空字符串时退化到通用占位 `web/src/views/404.vue`）
-- `meta.title` 取自 `rule.title`
-- `meta.icon` 取自 `rule.icon`
-- `meta.keepalive` 取自 `rule.keepalive`
-- `meta.menuType` 取自 `rule.type`（dir / menu / node）
-- `meta.openType` 取自 `rule.open_type`（tab / link / iframe，可空）
-- `meta.weigh` 取自 `rule.weight`
-- `meta.id` 取自 `rule.id`
-- `meta.pid` 取自 `rule.pid`
-- 父规则 → 子规则通过 `meta.id` / `meta.pid` 在前端二次组装为 `children` 树；后端 MUST 输出扁平数组。
+后端 `Init` 服务 SHALL 把每个 `AdminRule` 原样透传为兼容 `vue-router` `RouteRecordRaw` 的结构，字段映射为：`path` ← `rule.path`、`name` ← `rule.name`、`component` ← `rule.component`、`meta.title` ← `rule.title`、`meta.icon` ← `rule.icon`、`meta.keepalive` ← `rule.keepalive`、`meta.menuType` ← `rule.type`、`meta.openType` ← `rule.open_type`、`meta.weigh` ← `rule.weight`、`meta.id` ← `rule.id`、`meta.pid` ← `rule.pid`。
 
-`rule.type == "node"`（纯权限节点） MUST NOT 注册为路由（前端不展示），但仍 SHALL 出现在 `menus` 数组中以便前端按需展示权限节点标签。
+#### Scenario: Output is a flat array assembled on the frontend
+- **WHEN** `Init` 返回 `menus`
+- **THEN** 父子关系 SHALL 由 `meta.id` / `meta.pid` 表达
+- **AND** 后端 MUST 输出扁平数组，由前端二次组装为 `children` 树
+
+#### Scenario: Node rules are excluded from routes but kept in menus
+- **WHEN** `rule.type == "node"`
+- **THEN** 该规则 MUST NOT 注册为路由（前端不展示）
+- **AND** SHALL 仍出现在 `menus` 数组中，以便前端按需展示权限节点标签
 
 #### Scenario: 菜单项带 component
 
@@ -147,15 +143,13 @@
 
 ### Requirement: 前端 init 流程与登录落地
 
-前端 `web/src/layouts/admin/index.vue` 在 `<script setup>` 的 `onMounted` 钩子内 SHALL 顺序执行：
-1. 调 `web/src/api/admin/index.ts` 的 `init()`，请求 `GET /admin/init`；
-2. 失败 / 401 → 清空 `useAdminInfo` 后重定向回 `/admin/login`；
-3. 成功 → 把 `admin` 字段写入 `useAdminInfo`（不覆盖 token）、把 `site_config` 写入 `useConfig` 的 `siteConfig` 子状态、把 `menus` 写入 `useMenu` 的 `rawData`；
-4. 遍历 `menus` 注册动态路由：`meta.menuType === 'node'` 跳过；`path` 不以 `/` 开头的菜单 SHALL 注册为 `admin` 布局路由的子路由（`router.addRoute('admin', route)`），以 `/` 开头的保持顶层注册；`component` 字符串 SHALL 经 `import.meta.glob('/src/views/**/*.vue')` 解析为懒加载组件（精确 key → `'/src/views/' + component + '.vue'` → `'/src/views/' + component + '/index.vue'`），解析失败兜底 `/src/views/404.vue`；
-5. `router.replace` 跳转目标：loading 路由的 `to` 深链参数（JSON 解析出以 `/` 开头且非 `/admin/loading` 的 path）优先，否则后台主页 `/admin/dashboard`；目标导航失败时回落 `/admin/dashboard`；
-6. 主页 `/admin/dashboard` 为静态子路由，MUST NOT 依赖 `menus` 非空。
+前端 `web/src/layouts/admin/index.vue` 在 `<script setup>` 的 `onMounted` 钩子内 SHALL 完成一次后台初始化：请求 `GET /admin/init` → 写入各 store → 注册动态路由 → 跳转深链目标或后台主页。整个流程 MUST 在用户感知层面表现为「吃豆人动画过渡 → 落地目标页」的一次性过渡，不在中间状态把页面暴露给用户，MUST NOT 停在 `/admin/loading`（init 失败分支跳登录页除外）。
 
-整个流程 MUST 在用户感知层面表现为"吃豆人动画过渡 → 落地后台主页/深链目标"的一次性过渡，不在中间状态把页面暴露给用户。MUST NOT 出现停留在 `/admin/loading` 的死胡同（init 失败分支跳登录页除外）。
+#### Scenario: Successful init writes stores and registers routes
+- **WHEN** `GET /admin/init` 返回成功
+- **THEN** `admin` SHALL 写入 `useAdminInfo`（不覆盖 token）、`site_config` SHALL 写入 `useConfig` 的 `siteConfig`、`menus` SHALL 写入 `useMenu` 的 `rawData`
+- **AND** 遍历 `menus` 注册动态路由：`meta.menuType === 'node'` 跳过；`path` 不以 `/` 开头者 SHALL 注册为 `admin` 布局路由的子路由（`router.addRoute('admin', route)`），以 `/` 开头者保持顶层注册
+- **AND** `component` 字符串 SHALL 经 `import.meta.glob('/src/views/**/*.vue')` 解析为懒加载组件（精确 key → `'/src/views/' + component + '.vue'` → `'/src/views/' + component + '/index.vue'`），解析失败兜底 `/src/views/404.vue`
 
 #### Scenario: 登录后落地后台主页
 

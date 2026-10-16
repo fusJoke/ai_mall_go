@@ -7,27 +7,42 @@ Lets the system persist site-level configuration items (site name, ICP record nu
 
 ### Requirement: `config` 表持久化站点配置项
 
-The system SHALL persist site-level configuration items in a `config` table with the following columns:
+系统 SHALL 在 `config` 表持久化站点配置项，核心字段如下：
 
-| Column | SQL type | Nullable | Default | Notes |
+| 字段 | 类型 | 可空 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `id` | `INT UNSIGNED` | NOT NULL | auto-increment | primary key |
-| `name` | `VARCHAR(30)` | NOT NULL | `''` | unique identifier for a config item; MUST have a UNIQUE index |
-| `group` | `VARCHAR(30)` | NOT NULL | `''` | grouping for admin UI rendering |
-| `title` | `VARCHAR(50)` | NOT NULL | `''` | display title in admin UI |
-| `tip` | `VARCHAR(100)` | NOT NULL | `''` | helper text in admin UI |
-| `type` | `VARCHAR(30)` | NOT NULL | `''` | input component type (text / textarea / number / select / ...) |
-| `value` | `LONGTEXT` | NULL | NULL | the actual config value |
-| `content` | `LONGTEXT` | NULL | NULL | JSON payload for option-based types (select / radio / checkbox) |
-| `rule` | `VARCHAR(100)` | NOT NULL | `''` | validation rule |
-| `extend` | `VARCHAR(255)` | NOT NULL | `''` | extension attributes |
-| `input_extend` | `VARCHAR(255)` | NOT NULL | `''` | input-element extension attributes |
-| `allow_del` | `TINYINT UNSIGNED` | NOT NULL | `0` | `0` = cannot be deleted, `1` = can be deleted |
-| `weigh` | `INT` | NOT NULL | `0` | sort weight |
+| `id` | `INT UNSIGNED` | 否 | auto-increment | 主键 |
+| `name` | `VARCHAR(30)` | 否 | `''` | 配置项唯一标识 |
+| `group` | `VARCHAR(30)` | 否 | `''` | 后台 UI 分组 |
+| `title` | `VARCHAR(50)` | 否 | `''` | 后台展示标题 |
+| `tip` | `VARCHAR(100)` | 否 | `''` | 后台提示文案 |
+| `type` | `VARCHAR(30)` | 否 | `''` | 输入组件类型（text / textarea / number / select ...） |
 
-The `name` column MUST have a UNIQUE index.
+表名 MUST 为 `config`（若配置了表前缀，由 GORM `NamingStrategy` 施加）。
 
-The table MUST be named `config` (database table-prefix, if configured, is applied by the GORM `NamingStrategy`).
+#### Scenario: Core columns are present on the created table
+- **WHEN** 迁移建出 `config` 表
+- **THEN** 它 SHALL 含 `id` / `name` / `group` / `title` / `tip` / `type` 六列
+- **AND** 除 `id` 外各列 SHALL NOT NULL 且默认 `''`
+
+### Requirement: `config` 表取值与扩展字段
+
+系统 SHALL 在 `config` 表提供下列取值与扩展字段：
+
+| 字段 | 类型 | 可空 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `value` | `LONGTEXT` | 是 | NULL | 配置项实际取值 |
+| `content` | `LONGTEXT` | 是 | NULL | 选项型（select / radio / checkbox）的 JSON 载荷 |
+| `rule` | `VARCHAR(100)` | 否 | `''` | 校验规则 |
+| `extend` | `VARCHAR(255)` | 否 | `''` | 扩展属性 |
+| `input_extend` | `VARCHAR(255)` | 否 | `''` | 输入元素扩展属性 |
+| `allow_del` | `TINYINT UNSIGNED` | 否 | `0` | `0` 不可删除 / `1` 可删除 |
+| `weigh` | `INT` | 否 | `0` | 排序权重 |
+
+#### Scenario: Option-based types carry their payload in content
+- **WHEN** 一个配置项的 `type` 为 `select` / `radio` / `checkbox`
+- **THEN** 它的候选项列表 SHALL 以 JSON 存入 `content`
+- **AND** 具体取值 SHALL 存入 `value`
 
 #### Scenario: AutoMigrate creates the config table
 
