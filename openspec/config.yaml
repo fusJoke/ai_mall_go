@@ -1,32 +1,44 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context (shown to AI when creating artifacts)
+context: |
+  ## 项目
+  Go 电商 mall，module `ai-go-mall`，Go 1.27.1。三端：user（会员）/ supplier（供应商）/ admin（后台）。
+  前端是两个独立工程：`web/`（Vue3 + Element Plus，管理端与供应商端）、
+  `uni-h5/`（uni-app H5，会员端）。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  ## 技术栈与结构
+  - gin + GORM（MySQL 8.0，读写分离走 dbresolver）+ Redis + Elasticsearch v8
+  - 分层固定流向 Handler → Service → Repository → Model，禁止跨层或反向依赖
+  - handler / service / repository 按身份分子目录（admin / user / supplier）；model 不设子目录
+  - 迁移 `cmd/migrate/migrations/NNNNNN_<name>.{up,down}.sql`；每个命令一个入口目录 `cmd/<name>/`
+  - 测试用标准库 testing + sqlmock；断言必须能以「负向对照」证明其有效性
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  ## 约定
+  - 提交信息用 Conventional Commits（英文 type/scope + 中文正文）
+  - 每张业务表必须有 id / created_at / updated_at / deleted_at；时间戳统一 datetime(3)；deleted_at 建索引
+  - 需求文本用中文书写；正文尽量不超过 500 字符，细节下沉到 Scenario（超长会触发 validate 告警）
+
+# Per-artifact rules
+rules:
+  proposal:
+    - 必须包含「影响面」一节，内容来自 codegraph impact 的实际结果
+    - 必须写明非目标（Non-goals），避免范围蔓延
+  design:
+    - 关键取舍要说明「为什么不选另一条路」，而不只是「选了什么」
+  tasks:
+    - 每项任务动词开头、可独立验证，粒度不超过一个提交
+    - 完成后立即勾选，不要攒到最后补勾
+
+# Per-operation guidance
+operations:
+  apply:
+    guidance:
+      - 按 tasks.md 逐项执行，每项完成后立即勾选
+      - 关键断言必须做负向对照（把实现改回旧写法，确认测试确实失败）
+  archive:
+    guidance:
+      - 归档前先跑 openspec validate <change>，并逐条比对 delta 文本与代码现状
+      - 归档前自检 MODIFIED/REMOVED 引用的需求名是否存在于现行 specs（缺失会 Abort，且 validate 不查这个）
+      - 同一 capability 同一时刻只允许一个未归档 change 在改它，否则后归档者会静默覆盖前者的改动
+      - 归档后若代码有变更，跑 codegraph sync 重建索引

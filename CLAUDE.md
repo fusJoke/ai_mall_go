@@ -36,6 +36,43 @@ Go 电商 mall 项目，`module ai-go-mall`，Go 1.27.1。已落地：
 
 无 Makefile / task runner，统一用 Go 原生命令：构建 `go build ./...`；起服务 `go run ./cmd/serve`；迁移 `go run ./cmd/migrate`；测试 `go test ./...`（单个 `go test -run TestName ./path/to/pkg`）；格式化 `gofmt -w .`、`goimports -w .`；静态检查 `go vet ./...`；查标准库/依赖 API 用 `go doc <pkg>.<Symbol>`，不要直接 Read 包源码。
 
+> ⚠️ 本机需 `export GOCACHE="C:/Users/Public/gocache" GOTMPDIR="C:/Users/Public/gotmp"`（纯 ASCII 路径），
+> 否则 `go vet` / `go build` 可能被 SIGTERM 打断。另：**`gofmt -l` 在本仓不是有效门禁** ——
+> 全仓约 183 个文件因 CRLF（`core.autocrlf=true`）被标记，判断自己改的代码用
+> `tr -d '\r' < f.go > /tmp/x.go && gofmt -l /tmp/x.go`。其余环境坑见 `doc/开发工作流.md` §6。
+
+## 开发工作流（S1–S5，强制）
+
+完整版见 **`doc/开发工作流.md`**。核心是四工具各占开发流一段，且**每段的输出正好是下一段的输入**：
+
+| 阶段 | 工具 | 产出 |
+|---|---|---|
+| **S1 定位** | codegraph（`explore` / `impact`） | 影响面 → 写进 `proposal.md` |
+| **S2 规划** | openspec change（proposal / design / tasks + spec delta） | `tasks.md` → **直接就是 S3 的输入** |
+| **S3 执行** | superpowers `/superpowers:execute-plan`（无插件时：按 tasks 逐项做 + 先写测试） | 代码 + 测试 |
+| **S4 验证** | `go build`/`vet`/`test`、`vue-tsc --noEmit`、构建（+ 定向 ocr） | 通过 / 不通过 |
+| **S5 收口** | `openspec archive` → `codegraph sync` → `git commit` | specs 追平 + 索引新鲜 + 已提交 |
+
+不变量：**`openspec/specs/` 是当前真相，`changes/` 是待应用的补丁，`archive` 是唯一的应用动作。**
+
+**三条硬纪律**（详见文档 §3）：
+
+1. **完成即归档**，不要攒 —— 积压的代价是 `specs/` 变成过期真相（曾积压 7 个、最久 15 天，
+   导致 spec 落后代码 5~19 天）。
+2. **同一 capability，同一时刻只允许一个未归档 change 在改它。** 这是**唯一需要人来守**的规则：
+   工具按 `### Requirement: <名>` 匹配、**不看内容**，两个 change 改同名需求时后归档者会
+   **静默覆盖**前者（无警告、exit 0）。修复类改动**优先追加进已有未归档 change**，不新开。
+3. **验证有 token 预算**：L0（编译 + 单测 + **负向对照**）是主力；**ocr 默认不用**，确需时
+   `--path` 限定到 **≤5 个改动文件**、先 `--preview`、**不传 `--effort`**；**禁止 `ocr scan` 全仓**。
+
+**归档前必做**：`openspec validate <change>` **+ 逐条比对 delta 文本与代码现状** ——
+曾出现 change 标着 `✓ Complete`、其 delta 却写着与代码相反的语义（mock 默认开/关），
+归档会把错误文本永久冻进 specs。自检脚本见文档 §S5。
+
+**测试断言纪律**：`sqlmock` 下「守卫失效」**也会返回错误**（`call ... was not expected`），
+故 `err != nil` 是**弱断言** —— 必须让守卫返回**哨兵错误**并用 `errors.Is` 精确断言。
+**每写一条关键断言，就临时把实现改回旧写法跑一次（负向对照）；若测试仍通过，这条断言是假的。**
+
 ## 分层架构（固定流向，不可变）
 
 调用关系永远是 `Handler → Service → Repository → Model`，禁止跨层或反向依赖：
