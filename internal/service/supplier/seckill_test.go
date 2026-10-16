@@ -33,10 +33,17 @@ type fakeSeckillRepo struct {
 	createFunc         func(*gin.Context, *mall.MallSeckillActivity) (int64, error)
 	getByIDFunc        func(*gin.Context, int64) (*mall.MallSeckillActivity, error)
 	updateFunc         func(*gin.Context, *mall.MallSeckillActivity) error
+	deleteFunc         func(*gin.Context, int64) error
 	markRedisInitFunc  func(*gin.Context, int64) error
 	listBySupplierFunc func(*gin.Context, int64, repository.ListOptions) ([]mall.MallSeckillActivity, int64, error)
 	toggleStatusFunc   func(*gin.Context, int64, mall.MallBlindBoxStatus) error
 	sumPoolStockFunc   func(*gin.Context, int64) (int, error)
+
+	// 调用记录：回滚路径的回归断言依赖它（P1-2 要求回滚走 Delete 而不是 Update）。
+	deleteCalls     int
+	lastDeleteID    int64
+	lastDeletedFrom error
+	updateCalls     int
 }
 
 func (f *fakeSeckillRepo) Create(c *gin.Context, s *mall.MallSeckillActivity) (int64, error) {
@@ -55,8 +62,19 @@ func (f *fakeSeckillRepo) GetByID(c *gin.Context, id int64) (*mall.MallSeckillAc
 }
 
 func (f *fakeSeckillRepo) Update(c *gin.Context, s *mall.MallSeckillActivity) error {
+	f.updateCalls++
 	if f.updateFunc != nil {
 		return f.updateFunc(c, s)
+	}
+	return nil
+}
+
+func (f *fakeSeckillRepo) Delete(c *gin.Context, id int64) error {
+	f.deleteCalls++
+	f.lastDeleteID = id
+	if f.deleteFunc != nil {
+		f.lastDeletedFrom = f.deleteFunc(c, id)
+		return f.lastDeletedFrom
 	}
 	return nil
 }
@@ -325,6 +343,13 @@ func TestSeckillCreate_StockExceedsPool(t *testing.T) {
 	}
 }
 
+// TestSeckillCreate_RedisInitFailed 锁定 OCR 审查 P1-2：
+// SETNX 失败必须**真软删**刚 INSERT 的活动行（repo.Delete），而不是 Update。
+//
+// 原实现写的是 `_ = s.repo.Update(c, sec0)` 并注释称「触发软删路径走 Delete」，
+// 但 Update 的实现是 `Save(s)`（全字段同值重写，deleted_at 仍为 NULL），
+// 且该仓储当时根本没有 Delete 方法 —— 库里会留下一行 redis_initialized=false
+// 的正常活动，ListActive 推给 C 端形成「看得见、打不通」的坏活动。
 func TestSeckillCreate_RedisInitFailed(t *testing.T) {
 	bb := &fakeBlindBoxRepo{
 		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
@@ -335,7 +360,8 @@ func TestSeckillCreate_RedisInitFailed(t *testing.T) {
 	mc.setNXFunc = func(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
 		return false, nil // 模拟 SETNX 已存在（拒绝覆盖）
 	}
-	svc := NewSeckillService(SeckillServiceDeps{SeckillRepo: &fakeSeckillRepo{}, BlindBoxRepo: bb, Cache: mc, TxRunner: &mockTxRunner{}})
+	repo := &fakeSeckillRepo{}
+	svc := NewSeckillService(SeckillServiceDeps{SeckillRepo: repo, BlindBoxRepo: bb, Cache: mc, TxRunner: &mockTxRunner{}})
 	now := time.Now()
 	in := &mall.MallSeckillActivity{
 		BlindBoxID:   2,
@@ -347,6 +373,104 @@ func TestSeckillCreate_RedisInitFailed(t *testing.T) {
 	_, err := svc.Create(newSeckillCtx(), 7, in)
 	if !errors.Is(err, ErrRedisInitFailed) {
 		t.Errorf("err = %v, want ErrRedisInitFailed", err)
+	}
+	if repo.deleteCalls != 1 {
+		t.Fatalf("repo.Delete called %d times, want 1（回滚必须真软删）", repo.deleteCalls)
+	}
+	if repo.lastDeleteID != 100 {
+		t.Errorf("repo.Delete id = %d, want 100（Create 返回的新 ID）", repo.lastDeleteID)
+	}
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times, want 0（Update 是 Save 同值重写，不构成回滚）", repo.updateCalls)
+	}
+}
+
+// TestSeckillCreate_RedisSetNXError_RollsBack 覆盖 err != nil 分支：
+// 与「SETNX 返回 false」是两条不同的代码路径，同样必须真软删。
+func TestSeckillCreate_RedisSetNXError_RollsBack(t *testing.T) {
+	bb := &fakeBlindBoxRepo{
+		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+			return &mall.MallBlindBox{ID: 2, SupplierID: 7, Price: 99.0}, nil
+		},
+	}
+	mc := &seckillMockCache{mockCache: &mockCache{}}
+	mc.setNXFunc = func(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+		return false, errors.New("redis connection refused")
+	}
+	repo := &fakeSeckillRepo{}
+	svc := NewSeckillService(SeckillServiceDeps{SeckillRepo: repo, BlindBoxRepo: bb, Cache: mc, TxRunner: &mockTxRunner{}})
+	now := time.Now()
+	in := &mall.MallSeckillActivity{
+		BlindBoxID: 2, SeckillPrice: 79.0, TotalStock: 100,
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour),
+	}
+	if _, err := svc.Create(newSeckillCtx(), 7, in); !errors.Is(err, ErrRedisInitFailed) {
+		t.Errorf("err = %v, want ErrRedisInitFailed", err)
+	}
+	if repo.deleteCalls != 1 {
+		t.Fatalf("repo.Delete called %d times, want 1", repo.deleteCalls)
+	}
+	if repo.updateCalls != 0 {
+		t.Errorf("repo.Update called %d times, want 0", repo.updateCalls)
+	}
+}
+
+// TestSeckillCreate_MarkRedisInitializedFailed_RollsBack 覆盖第三个中间态：
+// SetNX 成功但 DB 标志没写上 —— 同样是「Redis 有、DB 半成品」，必须回滚 DB 行。
+func TestSeckillCreate_MarkRedisInitializedFailed_RollsBack(t *testing.T) {
+	bb := &fakeBlindBoxRepo{
+		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+			return &mall.MallBlindBox{ID: 2, SupplierID: 7, Price: 99.0}, nil
+		},
+	}
+	wantErr := errors.New("db write failed")
+	repo := &fakeSeckillRepo{
+		markRedisInitFunc: func(c *gin.Context, id int64) error { return wantErr },
+	}
+	svc := NewSeckillService(SeckillServiceDeps{
+		SeckillRepo: repo, BlindBoxRepo: bb,
+		Cache: &seckillMockCache{mockCache: &mockCache{}}, TxRunner: &mockTxRunner{},
+	})
+	now := time.Now()
+	in := &mall.MallSeckillActivity{
+		BlindBoxID: 2, SeckillPrice: 79.0, TotalStock: 100,
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour),
+	}
+	if _, err := svc.Create(newSeckillCtx(), 7, in); !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+	if repo.deleteCalls != 1 {
+		t.Errorf("repo.Delete called %d times, want 1", repo.deleteCalls)
+	}
+}
+
+// TestSeckillCreate_DeleteFailureDoesNotMaskError 验证回滚本身失败时：
+// 仍然返回 ErrRedisInitFailed（回滚是 best-effort 补偿），不把 Delete 的错误顶替主错误。
+// 该场景需要人工介入，service 只会打 ERROR 日志 —— 这里锁定「不改变对外错误语义」。
+func TestSeckillCreate_DeleteFailureDoesNotMaskError(t *testing.T) {
+	bb := &fakeBlindBoxRepo{
+		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallBlindBox, error) {
+			return &mall.MallBlindBox{ID: 2, SupplierID: 7, Price: 99.0}, nil
+		},
+	}
+	mc := &seckillMockCache{mockCache: &mockCache{}}
+	mc.setNXFunc = func(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+		return false, nil
+	}
+	repo := &fakeSeckillRepo{
+		deleteFunc: func(c *gin.Context, id int64) error { return errors.New("db down") },
+	}
+	svc := NewSeckillService(SeckillServiceDeps{SeckillRepo: repo, BlindBoxRepo: bb, Cache: mc, TxRunner: &mockTxRunner{}})
+	now := time.Now()
+	in := &mall.MallSeckillActivity{
+		BlindBoxID: 2, SeckillPrice: 79.0, TotalStock: 100,
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour),
+	}
+	if _, err := svc.Create(newSeckillCtx(), 7, in); !errors.Is(err, ErrRedisInitFailed) {
+		t.Errorf("err = %v, want ErrRedisInitFailed（不能被回滚错误顶替）", err)
+	}
+	if repo.deleteCalls != 1 {
+		t.Errorf("repo.Delete called %d times, want 1", repo.deleteCalls)
 	}
 }
 

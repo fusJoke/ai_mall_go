@@ -26,6 +26,7 @@ import (
 
 	"ai-go-mall/internal/infra/cache"
 	"ai-go-mall/internal/infra/cache/hotspot"
+	"ai-go-mall/internal/infra/log"
 	"ai-go-mall/internal/model/mall"
 	"ai-go-mall/internal/repository"
 	mallRepo "ai-go-mall/internal/repository/mall"
@@ -183,10 +184,8 @@ func (s *baseSeckillService) Create(c *gin.Context, supplierID int64, sec0 *mall
 		return nil, ErrSeckillStockExceedsPool
 	}
 
-	// Redis 库存初始化（必须在 commit 前完成）。
+	// Redis 库存初始化。
 	ctx := c.Request.Context()
-	stockKey := RedisKeySeckillStock + strconv.FormatInt(0, 10) // 占位，下面 UPDATE 真实 ID
-	_ = stockKey
 
 	// Step 1: INSERT activity（redis_initialized=false）。
 	sec0.RedisInitialized = false
@@ -206,16 +205,18 @@ func (s *baseSeckillService) Create(c *gin.Context, supplierID int64, sec0 *mall
 		key := RedisKeySeckillStock + strconv.FormatInt(sec0.ID, 10)
 		ok, err := s.cache.SetNX(ctx, key, strconv.Itoa(sec0.TotalStock), 0)
 		if err != nil {
-			// Redis 失败 → 软回滚（软删刚才的 activity 行 + 返回 ErrRedisInitFailed）。
-			_ = s.repo.Update(c, sec0) // best effort 触发软删路径走 Delete
+			s.rollbackCreatedActivity(c, sec0.ID)
 			return nil, fmt.Errorf("%w: %v", ErrRedisInitFailed, err)
 		}
 		if !ok {
 			// 已存在（极小概率，可能是重试创建）→ 不覆盖，避免破坏既有库存；返回错误。
-			_ = s.repo.Update(c, sec0)
+			s.rollbackCreatedActivity(c, sec0.ID)
 			return nil, ErrRedisInitFailed
 		}
 		if err := s.repo.MarkRedisInitialized(c, sec0.ID); err != nil {
+			// 库存已写进 Redis 但 DB 标志没落 → 同样是中间态：回收 DB 行（Redis key
+			// 由下次创建时的 SETNX 行为自然覆盖/复用，无需主动 DEL，避免误删在跑的库存）。
+			s.rollbackCreatedActivity(c, sec0.ID)
 			return nil, err
 		}
 		sec0.RedisInitialized = true
@@ -231,6 +232,30 @@ func (s *baseSeckillService) Create(c *gin.Context, supplierID int64, sec0 *mall
 	}
 
 	return sec0, nil
+}
+
+// rollbackCreatedActivity 回收「已 INSERT 但 Redis 初始化未完成」的秒杀活动行。
+//
+// 背景（OCR 审查 P1-2）：原实现写的是 `_ = s.repo.Update(c, sec0)`，注释称「best effort
+// 触发软删」，但 Update 的实现是 `Save(s)` —— 全字段同值重写，deleted_at 仍为 NULL，
+// **不是删除**；且该仓储当时根本没有 Delete 方法。结果是 Redis 失败后库里留下一行
+// redis_initialized=false 的正常活动：ListActive 会把它推给 C 端，用户点进去必然打不通，
+// 而日志只停在 ErrRedisInitFailed，运维难以察觉。
+//
+// 现在改为真软删（repo.Delete），并且失败不再静默：回滚本身失败属需要人工介入的状态
+// （孤儿行会污染 C 端列表），必须留下 ERROR 级日志与活动 ID。
+//
+// 残留窗口说明：DELETE 与 SETNX 之间进程若崩溃，孤儿行仍可能存在 ——
+// 要彻底消除需要把 INSERT 与 SETNX 放进同一事务（在事务内做 Redis IO），
+// 与既有设计「事务内不做外部 IO」冲突，故此处选择「事务外补偿 + 可观测」。
+func (s *baseSeckillService) rollbackCreatedActivity(c *gin.Context, id int64) {
+	if err := s.repo.Delete(c, id); err != nil {
+		log.FromCtx(c.Request.Context()).Error(
+			"seckill: rollback of uninitialized activity FAILED, manual cleanup needed",
+			"component", "service.supplier.seckill",
+			"seckill_id", id, "err", err,
+		)
+	}
 }
 
 // Update 实现见 SeckillService 注释。

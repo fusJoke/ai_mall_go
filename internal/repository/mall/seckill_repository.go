@@ -30,6 +30,13 @@ type SeckillRepository interface {
 	// Update 整行更新（业务字段全量覆盖）。
 	Update(c *gin.Context, s *mall.MallSeckillActivity) error
 
+	// Delete 软删活动（mall_seckill_activities.deleted_at 置位）。
+	//
+	// 用途：创建活动时 Redis 库存初始化失败的回滚路径 —— 必须让这行**真的查不到**，
+	// 否则 ListActive 会把它推给 C 端，形成「看得见、打不通」的坏活动。
+	// 注意 Update 不是删除（它是 Save 同值重写），回滚务必用本方法（OCR 审查 P1-2）。
+	Delete(c *gin.Context, id int64) error
+
 	// MarkRedisInitialized 标记 Redis 库存已初始化（创建活动后由 service 同步）。
 	MarkRedisInitialized(c *gin.Context, id int64) error
 
@@ -94,6 +101,18 @@ func (r *gormSeckillRepository) GetByID(c *gin.Context, id int64) (*mall.MallSec
 // Update 整行更新。
 func (r *gormSeckillRepository) Update(c *gin.Context, s *mall.MallSeckillActivity) error {
 	return repository.DB(c).Save(s).Error
+}
+
+// Delete 软删活动。
+//
+// GORM 的 Delete 遇 gorm.DeletedAt 会走 `UPDATE ... SET deleted_at=?`，
+// 因此行留在物理表里但所有查询（含 ListActive）都会被 deleted_at IS NULL 过滤掉。
+//
+// 幂等性：对已软删 / 不存在的 ID 调用影响 0 行但不报错，回滚路径可重复调用。
+func (r *gormSeckillRepository) Delete(c *gin.Context, id int64) error {
+	return repository.DB(c).
+		Where("id = ?", id).
+		Delete(&mall.MallSeckillActivity{}).Error
 }
 
 // MarkRedisInitialized 标记 Redis 库存已初始化。
