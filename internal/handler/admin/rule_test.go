@@ -452,6 +452,40 @@ func TestRuleHandler_Create_NormalizesOmittedEnums(t *testing.T) {
 	}
 }
 
+// TestRuleHandler_Create_FieldValidationPrecedesPIDLookup 覆盖 spec scenario
+// 「Field validation takes precedence over pid lookup」：请求同时违反 title 约束
+// 与 pid 约束时，MUST 报 rule.create.invalid_input，而不是 rule.create.pid_not_found。
+//
+// 同时断言 svc.Create 压根没被调用 —— 「先字段、后 PID」的顺序契约。
+func TestRuleHandler_Create_FieldValidationPrecedesPIDLookup(t *testing.T) {
+	called := false
+	svc := &stubRuleSvc{
+		createFn: func(c *gin.Context, e *model.AdminRule) error {
+			called = true
+			return adminSvc.ErrPIDNotFound
+		},
+	}
+	c, w := newRuleCtx(t)
+	postRuleJSON(c, "/admin/rule/create", model.AdminRule{
+		Pid: 9999, Type: model.RuleTypeMenu, Title: "", Name: "x",
+	})
+
+	NewRuleHandler(svc).Create(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "rule.create.invalid_input") {
+		t.Errorf("body = %s, want rule.create.invalid_input", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "rule.create.pid_not_found") {
+		t.Error("pid_not_found won the race; field validation must run first")
+	}
+	if called {
+		t.Error("svc.Create was called; field validation must short-circuit before the pid lookup")
+	}
+}
+
 func TestRuleHandler_EditPost_PIDCycleMapping(t *testing.T) {
 	svc := &stubRuleSvc{
 		updateFn: func(c *gin.Context, e *model.AdminRule) error { return adminSvc.ErrPIDCycle },

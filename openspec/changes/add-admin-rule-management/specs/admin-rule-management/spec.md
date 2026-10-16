@@ -46,6 +46,14 @@ The system MUST expose `POST /admin/rule/create` accepting a JSON body with at l
 - **WHEN** an authenticated admin posts a body whose `open_type` is not one of `tab` / `link` / `iframe`, or whose `extend` is not one of `none` / `add_route_only` / `add_menu_only`
 - **THEN** the response is `4xx` with code `rule.create.invalid_input` and the row is not inserted
 
+#### Scenario: Omitted enums normalized to column defaults
+- **WHEN** an authenticated admin posts `{title: "x", name: "x"}` to `/admin/rule/create` with `type` and `extend` omitted or empty
+- **THEN** the row is inserted with `type = "menu"` and `extend = "none"`, matching the column defaults
+
+#### Scenario: Field validation takes precedence over pid lookup
+- **WHEN** an authenticated admin posts `{pid: 9999, title: "", name: "x"}` to `/admin/rule/create`, violating both the `title` constraint and the `pid` constraint
+- **THEN** the response is `4xx` with code `rule.create.invalid_input`, not `rule.create.pid_not_found`
+
 #### Scenario: PID references non-existent rule
 - **WHEN** an authenticated admin posts `{pid: 9999, title: "x", name: "x"}` to `/admin/rule/create` and rule 9999 does not exist
 - **THEN** the response is `4xx` with code `rule.create.pid_not_found` and the row is not inserted
