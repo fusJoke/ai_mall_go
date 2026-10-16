@@ -240,7 +240,16 @@
 
 - [x] 9.4 `pnpm lint` 仅既有告警；新增文件零告警。验证：`npx eslint web/src/views/admin/rule/index.vue web/src/api/rule.ts` 无输出（运行后 ESLint 无任何告警；自动 fix 修复了 2 个 prettier 行尾换行）。
 
-- [ ] 9.5（需 MySQL）跑 `go run ./cmd/migrate up`，确认 000005 迁移成功，`SELECT * FROM admin_rule WHERE name='admin/rule'` 返回 1 行。验证：迁移无 error。
+- [x] 9.5（需 MySQL）跑 `go run ./cmd/migrate up`，确认 000005 迁移成功，`SELECT * FROM admin_rule WHERE name='admin/rule'` 返回 1 行。验证：迁移无 error。
+  验证记录（2026-10-16，docker `mysql-master` @127.0.0.1:3307，MySQL 8.0.46）：
+  `go run ./cmd/migrate up` → `up to latest: now at version 17`，exit 0；`version` → `17 false`；
+  `SELECT * FROM admin_rule WHERE name='admin/rule'` → 1 行（id=2, pid=0, type=menu, path=rule,
+  component=/src/views/admin/rule/index.vue, status=1）。
+  顺带修正（核实时发现）：up.sql 原用 `ON DUPLICATE KEY UPDATE`，但 `admin_rule.name` 上并无唯一索引
+  （000002 只建了 `idx_admin_rule_pid` / `idx_admin_rule_deleted_at`），该子句永不命中冲突分支，
+  达不到注释声称的「可重入」。在库内副本表实测：原写法连跑两次 → 2 行；改为
+  `INSERT ... SELECT ... WHERE NOT EXISTS`（对齐后来的 000012 / 000016）后连跑两次 → 仍 1 行。
+  down.sql 注释「仅软删…保留审计痕迹」与实现（`DELETE FROM`，硬删）不符，已订正为描述实际行为。
 
 - [ ] 9.6（需 MySQL + dev server）`go run ./cmd/serve` + `pnpm dev`，admin 登录后访问 `/admin/rule`：
   - 表格加载；
@@ -253,4 +262,29 @@
   - 删叶规则 → 软删成功；
   - 批量删除混合选中 → 仅叶规则被删。
   验证：浏览器目测 + curl 双验证。
-  备注：9.5 / 9.6 需要 MySQL + 启动 dev server，当前沙箱无 MySQL，留给用户本地或 CI 验证。
+  验证记录（2026-10-16，`go run ./cmd/serve` @:8080 + curl）：**后端 8 项全部通过，前端不可用 —— 本 change 暂不具备归档条件**。
+
+  **后端（已实测通过）**：list / all → 200；create → 落库字段与请求一致；
+  鉴权矩阵：无 token → 401、user token → 401 `auth.token_type_mismatch`、admin token → 200；
+  PID 自循环 → 400 `rule.edit.pid_cycle`；toggle-status → 200 且 status 1→0；
+  删有子规则 → 400 `rule.delete.has_children`；删叶 → 200；再删父 → 200；删不存在 id → 200（幂等）；
+  batch-delete `[父,子,不存在]` → `{"deleted":1,"skipped":2}`。
+
+  **阻塞（前端）**：`internal/model/admin.go` 的 `AdminRule` **没有任何 json tag**，接口实际返回 Go 字段名
+  （`ID` / `Pid` / `Title` / `Status` / `UpdatedAt` …），而 `web/src/api/rule.ts` 的类型签名与
+  `web/src/views/admin/rule/index.vue` 的模板/逻辑全部按 snake_case 消费
+  （`prop="id"` / `prop="title"` / `row.status` / `row.updated_at`；api 注释也写着「含 JSON 蛇形 tag」，
+  与实际不符）。`web/src/utils/request.ts` 的响应拦截器只做信封解包，不做 key 转换。
+  实测：对 `/admin/rule/list` 响应按前端路径取值，`row.id` / `row.title` / `row.status` / `row.updated_at`
+  命中 **0/4**；`openEditDialog(row)` 取到的 `row.id` 为 `undefined`
+  → `GET /admin/rule/edit?id=undefined` 返回 400 `invalid id`。
+  后果：表格各列全空、`row-key` 失效、编辑/启停/删除按钮均拿不到 id，页面对用户实际不可用。
+  → 需先统一 JSON 字段命名契约（后端补 json tag，或前端 api 层做 key 映射），再重跑 9.6。
+
+  **另记（接口语义，非本 change 引入）**：`RuleHandler.EditPost` 为**全量更新**语义（`ShouldBindJSON`
+  绑定整个 `model.AdminRule` 后 `svc.Update`），只传部分字段会把 `created_at` 写成零值，
+  MySQL 严格模式报 `Error 1292: Incorrect datetime value: '0000-00-00'` → HTTP 500。
+  前端 `submitForm` 提交的字段集不含 `created_at`，故即便字段名对齐，编辑也会 500；
+  修复须一并处理（改 PATCH 语义 / `update_columns`，或前端回传完整对象）。
+
+  备注（原）：9.5 / 9.6 需要 MySQL + 启动 dev server，当前沙箱无 MySQL，留给用户本地或 CI 验证。
