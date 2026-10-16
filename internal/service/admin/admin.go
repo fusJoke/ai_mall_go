@@ -8,6 +8,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +17,22 @@ import (
 	"gorm.io/gorm"
 
 	captchaInfra "ai-go-mall/internal/infra/captcha"
+	"ai-go-mall/internal/infra/log"
 	"ai-go-mall/internal/middleware"
 	"ai-go-mall/internal/model"
 	adminRepo "ai-go-mall/internal/repository/admin"
 	"ai-go-mall/internal/service"
 )
+
+// logOf 取「带组件名」的请求级 logger。
+//
+// 刻意做成函数而不是包级 var：log.Component(name) 会在**包初始化时**把当时
+// defaultLogger（尚未经 log.Init 配置，只有默认 TextHandler(stderr)）快照下来，
+// 而 log.Init 在 main 里晚于包初始化执行 —— 包级 var 会永远写不到配置指定的输出目标。
+// 走 FromCtx 则每次调用都解析当前 logger，并自动携带 trace_id 等请求字段。
+func logOf(c *gin.Context) *slog.Logger {
+	return log.FromCtx(c.Request.Context()).With("component", "service.admin")
+}
 
 // tokenIssuer 是 service 层对 token 写入能力的最小抽象。
 //
@@ -73,6 +85,13 @@ const tokenTypeAdmin = "admin"
 //
 // 后续若要可配置化，只需把这里改成读 config.Get().Admin.MaxLoginFailure。
 const MaxLoginFailure = 5
+
+// admin.Status 的取值约定（与 model.Admin.Status / repo.UpdateStatus 的 int8 对齐）。
+// Login 锁定、ToggleStatus、ResetLoginFailure 共用同一组取值，避免散落的字面量。
+const (
+	adminStatusDisabled int8 = 0
+	adminStatusEnabled  int8 = 1
+)
 
 // 通用错误：用户名 / 密码不匹配 / 账号被禁用 / 验证码错误。统一文案避免泄露用户名是否存在。
 var (
@@ -185,20 +204,33 @@ func (s *baseService) Login(c *gin.Context, username, password, captchaKey strin
 		return nil, "", err
 	}
 
-	// 3) 密码错误：递增失败计数。达到阈值就把 Status 置 0（锁定），并吊销该账号
+	// 3) 密码错误：**原子**递增失败计数。达到阈值就把 Status 置 0（锁定），并吊销该账号
 	// 既有 token —— 否则攻击者在被锁前签发的合法 token 在剩余 TTL 内仍能访问受保护资源。
-	// 落库 / Clear 失败不阻塞登录失败响应（防御动作，非关键路径）。
+	// 落库 / 锁定 / Clear 失败不阻塞登录失败响应（防御动作，非关键路径），但一律记日志 ——
+	// 静默失败会让「防护根本没生效」这件事长期不可见（OCR 审查 P1-1）。
 	//
-	// 落库走定向列更新（UpdateLoginFailure），禁止走 s.Update：此处模型带出的是
-	// 哈希形态的 Password，整行更新会被 hashPasswordIfNeeded 二次哈希，
-	// 导致正确密码永久失效（P0，见 openspec/changes/fix-admin-login-password-rehash）。
+	// 计数走 IncrementLoginFailure（DB 侧 `login_failure = login_failure + 1`），
+	// 禁止在 Go 层做 read-then-write：并发错密码时两个请求会互相覆盖，阈值永远打不到。
+	// 落库走定向列更新，禁止走 s.Update：此处模型带出的是哈希形态的 Password，
+	// 整行更新会被 hashPasswordIfNeeded 二次哈希，导致正确密码永久失效
+	// （P0，见 openspec/changes/fix-admin-login-password-rehash）。
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(adm.Password), []byte(password)); bcryptErr != nil {
-		failure := adm.LoginFailure + 1
-		locked := failure >= MaxLoginFailure
-		if locked {
-			_ = s.tm.Clear(c.Request.Context(), adm.ID, tokenTypeAdmin)
+		newFailure, err := s.repo.IncrementLoginFailure(c, uint(adm.ID))
+		if err != nil {
+			logOf(c).Error("admin login: increment login_failure failed",
+				"admin_id", adm.ID, "username", adm.Username, "err", err)
+			return nil, "", ErrInvalidCredentials
 		}
-		_ = s.repo.UpdateLoginFailure(c, uint(adm.ID), failure, locked)
+		if newFailure >= MaxLoginFailure {
+			if err := s.repo.UpdateStatus(c, uint(adm.ID), adminStatusDisabled); err != nil {
+				logOf(c).Error("admin login: lock account failed after threshold reached",
+					"admin_id", adm.ID, "username", adm.Username, "login_failure", newFailure, "err", err)
+			}
+			if err := s.tm.Clear(c.Request.Context(), adm.ID, tokenTypeAdmin); err != nil {
+				logOf(c).Warn("admin login: revoke tokens after lock failed",
+					"admin_id", adm.ID, "err", err)
+			}
+		}
 		return nil, "", ErrInvalidCredentials
 	}
 
@@ -316,9 +348,10 @@ func (s *baseService) ChangePassword(c *gin.Context, id uint, newPassword string
 	}
 	// 改密后强制吊销该 admin 全部 admin token，让用户用新密码重新登录。
 	if err := s.tm.Clear(c.Request.Context(), int64(id), tokenTypeAdmin); err != nil {
-		// 防御动作：吊销失败不阻塞「密码已改」这个事实。
-		// 生产环境可考虑接 zap / logrus 写 warn 日志；service 包当前没有 logger 依赖。
-		_ = err
+		// 防御动作：吊销失败不阻塞「密码已改」这个事实，但必须留痕 ——
+		// 静默吞掉会让「改密后旧会话仍然可用」这一安全缺口不可见（OCR 审查 P1-1 同源问题）。
+		logOf(c).Warn("admin change password: revoke tokens failed",
+			"admin_id", id, "err", err)
 	}
 	return nil
 }

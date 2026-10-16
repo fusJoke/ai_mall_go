@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ai-go-mall/internal/model"
 	"ai-go-mall/internal/repository"
 )
+
+// ErrAdminNotFound 影响 0 行时返回：行不存在 / 已软删。
+// 与 user 侧 ErrUserNotFound 同构，供 service 层用 errors.Is 区分「业务不存在」与「DB 故障」。
+var ErrAdminNotFound = errors.New("admin: not found")
 
 // Repository 是管理员实体的数据访问接口：通用 CRUD 由 CRUDRepository 提供，
 // 本包额外加一个按用户名查询的方法（登录场景需要）+ 4 个"仅改指定列"的专用方法
@@ -39,10 +44,24 @@ type Repository interface {
 	// 一次性写两列：login_failure=0, status=1。
 	ResetLoginFailure(c *gin.Context, id uint) error
 
-	// UpdateLoginFailure 仅更新登录失败相关列（Login 密码错误分支专用）。
-	// 固定写 login_failure=failure；locked=true 时同时写 status=0（触发锁定）。
-	// MUST NOT 携带 password 列 —— 模型里的 Password 是哈希，整行更新会把它二次哈希。
-	UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error
+	// IncrementLoginFailure 原子自增 login_failure 并返回**自增后的真实新值**。
+	//
+	// 设计动机（OCR 审查 P1-1）：旧的 UpdateLoginFailure(c, id, failure, locked) 接收
+	// 「最终绝对值」，service 层因此必须做 read-then-write（读 adm.LoginFailure → Go 层 +1 →
+	// 写回）。两个并发错密码请求都从同一份快照读到 4、都算出 5、都写 5 → 计数只 +1，
+	// 阈值永远打不到，管理员账号**可被并发暴力破解**。
+	//
+	// 本方法把「读 + 加 + 写」整体下推到 DB：
+	//   - `UPDATE admins SET login_failure = login_failure + 1 WHERE id = ?` 让 DB 串行化自增；
+	//   - 紧接着 `SELECT login_failure` 回读新值返回给 service —— 与自增同处一个事务，
+	//     走写库 session，避免主从延迟读到 stale。
+	//
+	// service 拿到 newFailure 后基于「真实新值」判定锁阈值（>= MaxLoginFailure），不再做 Go 层计算。
+	// 该判定天然安全：计数单调递增且每次自增只被一个请求观察到，因此必有请求观察到 >= 阈值。
+	//
+	// 与 user 侧 UserRepository.IncrementLoginFailure 完全同构（同一缺陷的两个实例，
+	// user 侧已在 H1 修复中改掉，admin 侧本次补齐）。
+	IncrementLoginFailure(c *gin.Context, id uint) (int, error)
 
 	// UpdateLoginSuccess 仅更新登录成功记账列（Login 成功分支专用）：
 	// 一次性写 login_failure=0, last_login_at=at, last_login_ip=ip。
@@ -132,19 +151,43 @@ func (r *baseRepository) ResetLoginFailure(c *gin.Context, id uint) error {
 		}).Error
 }
 
-// UpdateLoginFailure 仅写 login_failure（及触锁时的 status）。
+// IncrementLoginFailure 原子自增 login_failure 并在同事务内回读新值。
 //
-// locked 与否通过向 map 追加 "status" 键实现，最终仍是单条 UPDATE；
-// map 形式 Updates 只写出现的列，Password / Nickname 等字段不受影响。
-func (r *baseRepository) UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error {
-	cols := map[string]any{"login_failure": failure}
-	if locked {
-		cols["status"] = int8(0)
+// SQL 形态（注意 `+1` 是 gorm.Expr 内联字面量，不占位）：
+//
+//	UPDATE `admins` SET `login_failure`=login_failure + 1,`updated_at`=? WHERE id = ? AND `admins`.`deleted_at` IS NULL
+//	SELECT `login_failure` FROM `admins` WHERE id = ? AND `admins`.`deleted_at` IS NULL
+//
+// 影响行数 = 0（不存在 / 已软删）→ 返回 ErrAdminNotFound，由 service 决定如何响应。
+// 刻意只写 login_failure 一列，不携带 password —— 模型里的 Password 是哈希形态，
+// 整行更新会被二次哈希（P0，见 openspec/changes/fix-admin-login-password-rehash）。
+//
+// 触锁（status 置 0）由 service 在拿到返回值后单独发起，见 UpdateStatus：
+// 不把 IF(...) 塞进同一条 UPDATE，是因为 MySQL 对 SET 子句是「左到右、使用已更新的值」求值，
+// 列顺序一变判定就会 off-by-one，脆弱且难以察觉。
+func (r *baseRepository) IncrementLoginFailure(c *gin.Context, id uint) (int, error) {
+	var newFailure int
+	err := repository.RunInTx(c, func(txCtx *gin.Context) error {
+		res := repository.DB(txCtx).
+			Model(&model.Admin{}).
+			Where("id = ?", id).
+			Update("login_failure", gorm.Expr("login_failure + 1"))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrAdminNotFound
+		}
+		return repository.DB(txCtx).
+			Model(&model.Admin{}).
+			Where("id = ?", id).
+			Select("login_failure").
+			Scan(&newFailure).Error
+	})
+	if err != nil {
+		return 0, err
 	}
-	return repository.DB(c).
-		Model(&model.Admin{}).
-		Where("id = ?", id).
-		Updates(cols).Error
+	return newFailure, nil
 }
 
 // UpdateLoginSuccess 一次性写 login_failure=0, last_login_at, last_login_ip。

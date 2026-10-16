@@ -33,8 +33,8 @@ type mockRepo struct {
 	resetLoginFailureFunc func(c *gin.Context, id uint) error
 	deleteBatchFunc       func(c *gin.Context, ids []uint) error
 
-	updateLoginFailureFunc func(c *gin.Context, id uint, failure int, locked bool) error
-	updateLoginSuccessFunc func(c *gin.Context, id uint, ip string, at time.Time) error
+	incrementLoginFailureFunc func(c *gin.Context, id uint) (int, error)
+	updateLoginSuccessFunc    func(c *gin.Context, id uint, ip string, at time.Time) error
 
 	updateCalls        int
 	lastUpdate         *model.Admin
@@ -51,10 +51,14 @@ type mockRepo struct {
 	deleteBatchCalls   int
 	lastDeleteBatch    []uint
 
-	updateLoginFailureCalls int
-	lastLoginFailureID      uint
-	lastLoginFailure        int
-	lastLocked              bool
+	incrementLoginFailureCalls int
+	lastIncrementLoginFailureID uint
+	// lastLoginFailure 记录 IncrementLoginFailure 返回给 service 的「新值」，
+	// 也是 service 判定锁阈值的唯一依据（不再由 service 从 adm.LoginFailure 自行 +1）。
+	lastLoginFailure int
+	// nextLoginFailure > 0 时固定返回该值；否则按「上次返回值 + 1」自增（首次为 1），
+	// 模拟 DB 侧 `login_failure = login_failure + 1` 在并发下串行化的结果。
+	nextLoginFailure int
 
 	updateLoginSuccessCalls int
 	lastLoginSuccessID      uint
@@ -129,16 +133,25 @@ func (m *mockRepo) DeleteBatch(c *gin.Context, ids []uint) error {
 	return nil
 }
 
-// Login 路径 2 个定向列更新方法的 mock 实现。
-func (m *mockRepo) UpdateLoginFailure(c *gin.Context, id uint, failure int, locked bool) error {
-	m.updateLoginFailureCalls++
-	m.lastLoginFailureID = id
-	m.lastLoginFailure = failure
-	m.lastLocked = locked
-	if m.updateLoginFailureFunc != nil {
-		return m.updateLoginFailureFunc(c, id, failure, locked)
+// Login 失败分支的原子自增 mock。
+//
+// 语义对齐仓储实现（OCR 审查 P1-1）：返回值为 DB 回读的**自增后新值**，
+// service 只能消费它、不得自行基于 adm.LoginFailure 做 Go 层 +1。
+// 并发场景下每次调用返回不同的递增值，正是「计数不会被互相覆盖」的可观测证据。
+func (m *mockRepo) IncrementLoginFailure(c *gin.Context, id uint) (int, error) {
+	m.incrementLoginFailureCalls++
+	m.lastIncrementLoginFailureID = id
+	if m.incrementLoginFailureFunc != nil {
+		v, err := m.incrementLoginFailureFunc(c, id)
+		m.lastLoginFailure = v
+		return v, err
 	}
-	return nil
+	if m.nextLoginFailure > 0 {
+		m.lastLoginFailure = m.nextLoginFailure
+	} else {
+		m.lastLoginFailure++
+	}
+	return m.lastLoginFailure, nil
 }
 
 func (m *mockRepo) UpdateLoginSuccess(c *gin.Context, id uint, ip string, at time.Time) error {
@@ -330,15 +343,19 @@ func TestLogin_WrongPassword(t *testing.T) {
 	if iss.createCalls != 0 {
 		t.Errorf("issuer.Create called %d times on wrong password, want 0", iss.createCalls)
 	}
-	// 失败计数递增：走定向列更新 UpdateLoginFailure（非 Update），LoginFailure == 1、未触锁
-	if repo.updateLoginFailureCalls != 1 {
-		t.Errorf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
+	// 失败计数递增：走原子自增 IncrementLoginFailure（非 Update），新值 1、未触锁。
+	if repo.incrementLoginFailureCalls != 1 {
+		t.Errorf("repo.IncrementLoginFailure called %d times, want 1", repo.incrementLoginFailureCalls)
 	}
 	if repo.lastLoginFailure != 1 {
-		t.Errorf("repo.UpdateLoginFailure failure = %d, want 1", repo.lastLoginFailure)
+		t.Errorf("repo.IncrementLoginFailure returned newFailure = %d, want 1", repo.lastLoginFailure)
 	}
-	if repo.lastLocked {
-		t.Errorf("repo.UpdateLoginFailure locked = true, want false (below threshold)")
+	if repo.lastIncrementLoginFailureID != uint(adm.ID) {
+		t.Errorf("repo.IncrementLoginFailure id = %d, want %d", repo.lastIncrementLoginFailureID, adm.ID)
+	}
+	// 未达阈值：不得写 status（锁定），也不得吊销 token。
+	if repo.updateStatusCalls != 0 {
+		t.Errorf("repo.UpdateStatus called %d times below threshold, want 0", repo.updateStatusCalls)
 	}
 	// 回归（P0 fix-admin-login-password-rehash）：Login 不得触碰通用 Update（哈希入口）。
 	if repo.updateCalls != 0 {
@@ -354,12 +371,12 @@ func TestLogin_WrongPassword(t *testing.T) {
 // 一起覆盖阈值以下 / 阈值触发的两种边界。
 func TestLogin_WrongPassword_LocksAtThreshold(t *testing.T) {
 	adm := newTestAdmin(t)
-	// 让首次失败直接命中阈值：起始计数 4，加 1 后 = MaxLoginFailure → 锁定。
-	adm.LoginFailure = MaxLoginFailure - 1
 	repo := &mockRepo{
 		getByUsernameFunc: func(c *gin.Context, username string) (*model.Admin, error) {
 			return adm, nil
 		},
+		// 模拟 DB 回读的自增新值正好落在阈值上（上一轮计数已是 MaxLoginFailure-1）。
+		nextLoginFailure: MaxLoginFailure,
 	}
 	iss := &mockIssuer{}
 	captcha := &mockCaptcha{}
@@ -376,14 +393,21 @@ func TestLogin_WrongPassword_LocksAtThreshold(t *testing.T) {
 	if iss.createCalls != 0 {
 		t.Errorf("issuer.Create called %d times on invalid creds, want 0", iss.createCalls)
 	}
-	if repo.updateLoginFailureCalls != 1 {
-		t.Fatalf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
+	if repo.incrementLoginFailureCalls != 1 {
+		t.Fatalf("repo.IncrementLoginFailure called %d times, want 1", repo.incrementLoginFailureCalls)
 	}
 	if repo.lastLoginFailure != MaxLoginFailure {
-		t.Errorf("repo.UpdateLoginFailure failure = %d, want %d", repo.lastLoginFailure, MaxLoginFailure)
+		t.Errorf("repo.IncrementLoginFailure returned newFailure = %d, want %d", repo.lastLoginFailure, MaxLoginFailure)
 	}
-	if !repo.lastLocked {
-		t.Errorf("repo.UpdateLoginFailure locked = false, want true (at threshold)")
+	// 达阈值 → 调用方必须显式写 status=0 完成锁定（与原子自增分离的两条腿）。
+	if repo.updateStatusCalls != 1 {
+		t.Errorf("repo.UpdateStatus called %d times at threshold, want 1", repo.updateStatusCalls)
+	}
+	if repo.lastUpdateStatus != adminStatusDisabled {
+		t.Errorf("repo.UpdateStatus status = %d, want %d", repo.lastUpdateStatus, adminStatusDisabled)
+	}
+	if repo.lastUpdateStatusID != uint(adm.ID) {
+		t.Errorf("repo.UpdateStatus id = %d, want %d", repo.lastUpdateStatusID, adm.ID)
 	}
 	// 回归（P0 fix-admin-login-password-rehash）：锁定路径同样不得触碰通用 Update。
 	if repo.updateCalls != 0 {
@@ -425,8 +449,8 @@ func TestLogin_WrongPassword_BelowThreshold_NoClear(t *testing.T) {
 	if iss.clearCalls != 0 {
 		t.Errorf("issuer.Clear called %d times below threshold, want 0", iss.clearCalls)
 	}
-	if repo.lastLocked {
-		t.Errorf("repo.UpdateLoginFailure locked = true below threshold, want false")
+	if repo.updateStatusCalls != 0 {
+		t.Errorf("repo.UpdateStatus called %d times below threshold, want 0", repo.updateStatusCalls)
 	}
 	// 回归（P0 fix-admin-login-password-rehash）：未触锁路径也不得触碰通用 Update。
 	if repo.updateCalls != 0 {
@@ -656,8 +680,8 @@ func TestLogin_NeverTouchesPasswordHash(t *testing.T) {
 		if repo.updateCalls != 0 {
 			t.Errorf("repo.Update called %d times on wrong-password path, want 0", repo.updateCalls)
 		}
-		if repo.updateLoginFailureCalls != 1 {
-			t.Errorf("repo.UpdateLoginFailure called %d times, want 1", repo.updateLoginFailureCalls)
+		if repo.incrementLoginFailureCalls != 1 {
+			t.Errorf("repo.IncrementLoginFailure called %d times, want 1", repo.incrementLoginFailureCalls)
 		}
 	})
 
