@@ -401,7 +401,15 @@ func (m *Manager) ResetFailForTest() {
 }
 
 // withinTolerance 比对用户点 p 与放置点 pl 的欧氏距离是否在 pl.Kind 对应的容差半径内。
+//
+// 安全约束：X/Y 直接来自请求体（handler 仅做 binding:"required"），必须先做范围钳制。
+// 若不做，超大坐标会让 dx*dx 在 int64 上回绕 —— 例如 x = 2^32 时 dx*dx ≡ 0 (mod 2^64)，
+// 平方和为 0，任意坐标都能通过容差校验，验证码被完全绕过（OCR 审查 P0-1）。
+// 钳制后 |dx| <= ImageWidth、|dy| <= ImageHeight，平方和最大 350²+200² = 162500，不可能溢出。
 func withinTolerance(p Point, pl PlacedElem) bool {
+	if p.X < 0 || p.X > ImageWidth || p.Y < 0 || p.Y > ImageHeight {
+		return false
+	}
 	radius := ToleranceRadiusText
 	if pl.Kind == KindIcon {
 		radius = ToleranceRadiusIcon

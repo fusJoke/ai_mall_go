@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -530,6 +531,62 @@ func TestWithinTolerance(t *testing.T) {
 				t.Errorf("withinTolerance = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestWithinTolerance_RejectsOutOfCanvasCoords 锁定 OCR 审查 P0-1 的修复：
+// X/Y 来自请求体且无上游校验，超大值会让 dx*dx 在 int64 上回绕成 0，
+// 使任意坐标都落在容差内（x = 2^32 → dx² ≡ 0 mod 2^64）。
+// 修复后越界坐标一律返回 false，必须在平方之前被拦住。
+func TestWithinTolerance_RejectsOutOfCanvasCoords(t *testing.T) {
+	pl := PlacedElem{CX: 100, CY: 80, Kind: KindText}
+	tests := []struct {
+		name string
+		pt   Point
+	}{
+		{"x = 2^32 (dx² 回绕为 0)", Point{X: 1 << 32, Y: 80}},
+		{"x = 2^32 + 1", Point{X: 1<<32 + 1, Y: 80}},
+		{"x = -2^32", Point{X: -(1 << 32), Y: 80}},
+		{"y = 2^32", Point{X: 100, Y: 1 << 32}},
+		{"x 与 y 同时 2^32", Point{X: 1 << 32, Y: 1 << 32}},
+		{"负坐标", Point{X: -1, Y: 80}},
+		{"x 超出画布右边界", Point{X: ImageWidth + 1, Y: 80}},
+		{"y 超出画布下边界", Point{X: 100, Y: ImageHeight + 1}},
+		{"math.MaxInt", Point{X: math.MaxInt, Y: math.MaxInt}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if withinTolerance(tc.pt, pl) {
+				t.Errorf("withinTolerance(%+v) = true, want false（越界坐标必须判失败）", tc.pt)
+			}
+		})
+	}
+}
+
+// TestVerifyClick_RejectsOverflowPoint 是 P0-1 的端到端锁定：
+// 用「溢出坐标 + 正确的点数」提交，必须返回 ErrMismatch 而不是整单通过。
+func TestVerifyClick_RejectsOverflowPoint(t *testing.T) {
+	stored := buildStoredInfo(t,
+		PlacedElem{Name: "A", CX: 100, CY: 80, Kind: KindText},
+		PlacedElem{Name: "B", CX: 50, CY: 50, Kind: KindText},
+	)
+	repo := newMockRepo()
+	m := newTestManager(repo, defaultCfg())
+	if err := m.repo.Create(context.Background(), &model.Captcha{
+		Key: "ovf", Info: &stored, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed captcha: %v", err)
+	}
+
+	// 首点用 2^32 覆盖（dx² 回绕为 0）；第二点保持正确，确保失败只会来自首点。
+	err := m.VerifyClick(context.Background(), &VerifyReq{
+		Key:    "ovf",
+		Points: []Point{{X: 1 << 32, Y: 1 << 32}, {X: 50, Y: 50}},
+		W:      ImageWidth,
+		H:      ImageHeight,
+	}, false)
+	if !errors.Is(err, ErrMismatch) {
+		t.Fatalf("VerifyClick(overflow point) = %v, want ErrMismatch", err)
 	}
 }
 
