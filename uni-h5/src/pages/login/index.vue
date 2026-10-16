@@ -19,7 +19,10 @@ import { onLoad } from '@dcloudio/uni-app'
 
 import NavBar from '@/components/nav-bar.vue'
 import { loginMobile, sendSms } from '@/api/auth'
-import { FIXED_SMS_CODE, MOBILE_RE, SMS_COUNTDOWN, TAB_PATHS, USE_MOCK } from '@/config'
+import { MOBILE_RE, SMS_COUNTDOWN, TAB_PATHS, USE_MOCK } from '@/config'
+// FIXED_SMS_CODE 只用于页面底部的「开发期提示」文案（v-if="USE_MOCK"），
+// 因此从 mock 层内部取，而不是从通用 config 取（OCR 审查 P2-5）。
+import { FIXED_SMS_CODE } from '@/mock/constants'
 import { setAuth } from '@/store/user'
 import { applyDevToken } from '@/utils/session'
 import { toast, toastError } from '@/utils/toast'

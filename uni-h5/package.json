@@ -5,7 +5,10 @@
   "description": "ai-go-mall C 端移动客户端（uni-app H5）",
   "scripts": {
     "dev:h5": "uni",
-    "build:h5": "uni build"
+    "build:h5": "uni build",
+    "build:h5:prod": "uni build --mode production",
+    "verify:prod-bundle": "node scripts/verify-prod-bundle.mjs",
+    "check:prod": "npm run build:h5:prod && npm run verify:prod-bundle"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020420260813003",

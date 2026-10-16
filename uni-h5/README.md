@@ -38,6 +38,9 @@ npm run dev:h5
 
 # 生产构建，产物在 dist/build/h5
 npm run build:h5
+
+# 生产构建 + 产物卫生门禁（推荐：发布前跑这一条）
+npm run check:prod
 ```
 
 如果后端不在默认端口，设置代理目标：
@@ -45,6 +48,19 @@ npm run build:h5
 ```bash
 VITE_DEV_PROXY_TARGET=http://127.0.0.1:9090 npm run dev:h5
 ```
+
+### 环境文件放哪里
+
+| 文件 | 何时加载 | 放什么 |
+| --- | --- | --- |
+| `.env.development.local` | **仅 dev 模式**（已 gitignore） | 开发令牌、`VITE_USE_MOCK=true` 等开发专用值 |
+| `.env.example` | 不加载（模板） | 变量清单与说明 |
+| ~~`.env.local`~~ | **production 构建同样加载** | ⚠️ 不要用：Vite 的加载顺序是 `.env → .env.local → .env.<mode> → .env.<mode>.local`，放这里等于每次打生产包都会把内容静态内联进 JS |
+
+`VITE_USE_MOCK` **默认关闭**：只有显式 `true` 才启用（原先是 `!== 'false'` 即默认开启，
+漏配变量会静默跑假数据）。生产构建里若仍为 `true`，或 `VITE_DEV_TOKEN` 非空，
+`src/config/index.ts` 的 `assertProductionHygiene()` 会在入口直接抛错，
+`npm run verify:prod-bundle` 则会在产物里把它们扫出来。
 
 ---
 
@@ -63,9 +79,13 @@ VITE_DEV_PROXY_TARGET=http://127.0.0.1:9090 npm run dev:h5
 
 ### 怎么做
 
-1. 复制 `.env.example` 为 `.env.local`（已被 `.gitignore` 忽略，不会进仓库）。
+1. 复制 `.env.example` 为 **`.env.development.local`**（匹配 `.env.*.local`，已被 `.gitignore` 忽略）。
 2. 用后端提供的开发令牌工具生成一个**真实用户令牌**，填入 `VITE_DEV_TOKEN`。
 3. 重启开发服务器。
+
+> ⚠️ **不要放进 `.env.local`**。该文件在 production 构建里同样会被加载，而
+> `VITE_DEV_TOKEN` 会被 Vite 在构建期**静态内联**进产物 —— 任何访客 view-source
+> 就能拿到一串能直接读写真实用户数据的令牌（OCR 审查 P2-4）。
 
 配置后：mock 登录成功时会用该真实令牌替换会话，此后抽卡会**真扣库存、真出订单**。
 
