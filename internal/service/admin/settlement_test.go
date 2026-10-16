@@ -185,6 +185,11 @@ func (m *adminSettlementOrderRepo) ListByUser(c *gin.Context, userID int64, opts
 func (m *adminSettlementOrderRepo) UpdateStatus(c *gin.Context, id int64, status mall.MallDrawOrderStatus) error {
 	return nil
 }
+
+// UpdateStatusCAS 为 P2-2 新增接口方法；结算域不使用，no-op stub。
+func (m *adminSettlementOrderRepo) UpdateStatusCAS(c *gin.Context, id int64, from, to mall.MallDrawOrderStatus) (int64, error) {
+	return 0, nil
+}
 func (m *adminSettlementOrderRepo) ListItemsByOrderID(c *gin.Context, orderID int64) ([]mall.MallDrawOrderItem, error) {
 	return nil, nil
 }
@@ -215,11 +220,40 @@ var _ mallRepo.DrawOrderRepository = (*adminSettlementOrderRepo)(nil)
 // fixtures
 // =============================================================================
 
+// mockTxRunner 同步执行 fn（不真开事务），并记录调用次数。
+//
+// 用途：Generate 现在把「INSERT settlement/items → 状态机推进 → UpdateStatus」
+// 包在同一个事务里（OCR 审查 P1-5）。单测只关心 service 层的编排，
+// 不需要真库；事务本身的原子性由 internal/repository 的 RunInTx 单测覆盖。
+type mockTxRunner struct {
+	runFunc func(c *gin.Context, fn func(txCtx *gin.Context) error) error
+	runs    int
+}
+
+func (m *mockTxRunner) Run(c *gin.Context, fn func(txCtx *gin.Context) error) error {
+	m.runs++
+	if m.runFunc != nil {
+		return m.runFunc(c, fn)
+	}
+	return fn(c)
+}
+
 func newAdminSettlementSvc(srepo *adminSettlementRepo, suprepo *adminSettlementSupplierRepo) SettlementService {
 	return NewSettlementService(SettlementServiceDeps{
 		SettlementRepo: srepo,
 		SupplierRepo:   suprepo,
 		DrawOrderRepo:  &adminSettlementOrderRepo{},
+		TxRunner:       &mockTxRunner{},
+	})
+}
+
+// newAdminSettlementSvcWithTx 同上，但允许指定 txRunner（P1-5 回归用）。
+func newAdminSettlementSvcWithTx(srepo *adminSettlementRepo, suprepo *adminSettlementSupplierRepo, txr txRunner) SettlementService {
+	return NewSettlementService(SettlementServiceDeps{
+		SettlementRepo: srepo,
+		SupplierRepo:   suprepo,
+		DrawOrderRepo:  &adminSettlementOrderRepo{},
+		TxRunner:       txr,
 	})
 }
 
@@ -521,6 +555,96 @@ func TestAdminSettlementGenerate_ConflictPropagates(t *testing.T) {
 	_, err := svc.Generate(newAdminSettlementCtx(), 3, time.Now().Add(-time.Hour), time.Now())
 	if !errors.Is(err, ErrSettlementConflict) {
 		t.Errorf("err = %v, want ErrSettlementConflict", err)
+	}
+	// 冲突时不得再推进状态（否则会把别人的单改成 processing）。
+	if srepo.updateStatusCalls != 0 {
+		t.Errorf("UpdateStatus called %d times on conflict, want 0", srepo.updateStatusCalls)
+	}
+}
+
+// TestAdminSettlementGenerate_UpdateStatusFailureAborts 锁定 OCR 审查 P1-5：
+// INSERT settlement/items（repo.Generate）与状态推进（UpdateStatus）必须在**同一个事务**里。
+//
+// 原实现是先调 repo.Generate（自带事务，已 COMMIT）再调 UpdateStatus：
+// 后者失败时返回 error 但库里已经躺着一张 pending 结算单 —— 管理员看到报错却生成了数据，
+// 重试还会撞 (supplier_id, period_start, period_end) 唯一键返回 ErrSettlementConflict，
+// 无法通过界面重建，只能人工处理。
+//
+// 断言三点：
+//  1. 整段编排只开一个事务（txRunner.Run 恰好 1 次），失败时由事务统一回滚；
+//  2. 错误原样上抛（不被吞成 ErrNoOrdersToSettle 之类）；
+//  3. 不返回部分构造的 settlement（调用方不会误以为成功）。
+func TestAdminSettlementGenerate_UpdateStatusFailureAborts(t *testing.T) {
+	withDefaultConfig(t)
+	wantErr := errors.New("db write failed")
+
+	suprepo := &adminSettlementSupplierRepo{
+		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallSupplier, error) {
+			rate := ptr64(0.10)
+			return &mall.MallSupplier{ID: id, CommissionRate: rate}, nil
+		},
+	}
+	srepo := &adminSettlementRepo{
+		listEligibleFunc: func(c *gin.Context, supplierID int64, periodStart, periodEnd time.Time) ([]mall.MallDrawOrder, error) {
+			return []mall.MallDrawOrder{{ID: 1, Price: 100}}, nil
+		},
+		updateStatusFunc: func(c *gin.Context, id int64, status mall.MallSettlementStatus) error {
+			return wantErr
+		},
+	}
+	txr := &mockTxRunner{}
+	svc := newAdminSettlementSvcWithTx(srepo, suprepo, txr)
+
+	settlement, err := svc.Generate(newAdminSettlementCtx(), 3, time.Now().Add(-time.Hour), time.Now())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want %v（必须原样上抛，交给事务回滚）", err, wantErr)
+	}
+	if settlement != nil {
+		t.Errorf("settlement = %+v, want nil（失败时不得返回部分结果）", settlement)
+	}
+	if txr.runs != 1 {
+		t.Errorf("txRunner.Run called %d times, want 1（编排必须在单个事务内）", txr.runs)
+	}
+	// repo.Generate 与 UpdateStatus 都在同一个 txRunner.Run 内被调用过一次。
+	if srepo.generateCalls != 1 {
+		t.Errorf("Generate called %d times, want 1", srepo.generateCalls)
+	}
+	if srepo.updateStatusCalls != 1 {
+		t.Errorf("UpdateStatus called %d times, want 1", srepo.updateStatusCalls)
+	}
+}
+
+// TestAdminSettlementGenerate_NoOrdersOpensNoTransaction 补充边界：
+// 前置校验（无可结算订单）失败时必须**早退**，不要白开一个事务。
+//
+// 说明：事务内第二个失败点只有 UpdateStatus —— state.Transition 接收的是显式的
+// from/to 两个常量（Pending → Processing 恒合法），读不到实体当前状态，
+// 因此状态机分支在当前设计下不可能失败，没有可测的失败注入点。
+func TestAdminSettlementGenerate_NoOrdersOpensNoTransaction(t *testing.T) {
+	withDefaultConfig(t)
+
+	suprepo := &adminSettlementSupplierRepo{
+		getByIDFunc: func(c *gin.Context, id int64) (*mall.MallSupplier, error) {
+			rate := ptr64(0.10)
+			return &mall.MallSupplier{ID: id, CommissionRate: rate}, nil
+		},
+	}
+	srepo := &adminSettlementRepo{
+		listEligibleFunc: func(c *gin.Context, supplierID int64, periodStart, periodEnd time.Time) ([]mall.MallDrawOrder, error) {
+			return nil, nil // 无可结算订单
+		},
+	}
+	txr := &mockTxRunner{}
+	svc := newAdminSettlementSvcWithTx(srepo, suprepo, txr)
+
+	if _, err := svc.Generate(newAdminSettlementCtx(), 3, time.Now().Add(-time.Hour), time.Now()); !errors.Is(err, ErrNoOrdersToSettle) {
+		t.Fatalf("err = %v, want ErrNoOrdersToSettle", err)
+	}
+	if txr.runs != 0 {
+		t.Errorf("txRunner.Run called %d times, want 0（无订单应早退）", txr.runs)
+	}
+	if srepo.generateCalls != 0 {
+		t.Errorf("Generate called %d times, want 0", srepo.generateCalls)
 	}
 }
 

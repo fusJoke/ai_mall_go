@@ -124,6 +124,20 @@ type SettlementService interface {
 	MarkPaid(c *gin.Context, settlementID int64, adminID int64) error
 }
 
+// txRunner 是事务执行的最小抽象（与 service/user、service/supplier 同款约定）：
+// 生产路径走 repository.RunInTx，单测注入同步执行的 stub，
+// 避免只为了跑 service 用例就去搭 sqlmock / 真库。
+type txRunner interface {
+	Run(c *gin.Context, fn func(txCtx *gin.Context) error) error
+}
+
+// defaultTxRunner 走 repository.RunInTx（生产路径）。
+type defaultTxRunner struct{}
+
+func (defaultTxRunner) Run(c *gin.Context, fn func(txCtx *gin.Context) error) error {
+	return repository.RunInTx(c, fn)
+}
+
 // SettlementServiceDeps 注入 SettlementService 所需的依赖。
 type SettlementServiceDeps struct {
 	SettlementRepo mallRepo.SettlementRepository
@@ -134,6 +148,9 @@ type SettlementServiceDeps struct {
 	// Channels 渠道工厂（D18）：MarkPaid 成功后经 "bank" 渠道记录打款。
 	// MVP 是 mock/占位 driver（仅记录）；nil 时跳过（兼容旧单测 / 缺依赖装配）。
 	Channels channel.ChannelFactory
+
+	// TxRunner 可选；nil 时走 repository.RunInTx（生产默认）。
+	TxRunner txRunner
 }
 
 // baseSettlementService 是 SettlementService 的默认实现。
@@ -142,15 +159,21 @@ type baseSettlementService struct {
 	supplier supplierRepo.SupplierRepository
 	order    mallRepo.DrawOrderRepository
 	channels channel.ChannelFactory
+	txr      txRunner
 }
 
 // NewSettlementService 接收依赖，返回 SettlementService 接口。
 func NewSettlementService(d SettlementServiceDeps) SettlementService {
+	txr := d.TxRunner
+	if txr == nil {
+		txr = defaultTxRunner{}
+	}
 	return &baseSettlementService{
 		repo:     d.SettlementRepo,
 		supplier: d.SupplierRepo,
 		order:    d.DrawOrderRepo,
 		channels: d.Channels,
+		txr:      txr,
 	}
 }
 
@@ -247,19 +270,24 @@ func (s *baseSettlementService) Generate(c *gin.Context, supplierID int64, perio
 		PayoutAmount:     payout,
 		Status:           mall.SettlementStatusPending,
 	}
-	if err := s.repo.Generate(c, settlement, items); err != nil {
-		// repo 已识别 UK 冲突 → ErrSettlementConflict，原样上抛。
+	if err := s.txr.Run(c, func(txCtx *gin.Context) error {
+		// repo.Generate 自带事务；在已有事务下 RunInTx 会退化为 SAVEPOINT，
+		// 因此 INSERT settlement + items 与外层的状态推进同处一个原子单元。
+		if err := s.repo.Generate(txCtx, settlement, items); err != nil {
+			// repo 已识别 UK 冲突 → ErrSettlementConflict，原样上抛。
+			return err
+		}
+
+		// 状态机推进 pending → processing（Generate 完成后立即生效）。
+		// 校验失败（编程错误）→ abort；正常路径上 pending → processing 永远合法。
+		if _, err := state.Transition(state.SettlementStates.Pending, state.SettlementStates.Processing, &state.Context{Entity: settlement}); err != nil {
+			return err
+		}
+		return s.repo.UpdateStatus(txCtx, settlement.ID, mall.SettlementStatusProcessing)
+	}); err != nil {
 		return nil, err
 	}
 
-	// 状态机推进 pending → processing（Generate 完成后立即生效）。
-	// 校验失败（编程错误）→ abort；正常路径上 pending → processing 永远合法。
-	if _, err := state.Transition(state.SettlementStates.Pending, state.SettlementStates.Processing, &state.Context{Entity: settlement}); err != nil {
-		return nil, err
-	}
-	if err := s.repo.UpdateStatus(c, settlement.ID, mall.SettlementStatusProcessing); err != nil {
-		return nil, err
-	}
 	settlement.Status = mall.SettlementStatusProcessing
 	return settlement, nil
 }
