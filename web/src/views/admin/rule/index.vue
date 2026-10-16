@@ -1,15 +1,10 @@
 <template>
     <div class="admin-rule">
-        <!-- 顶部工具栏：搜索 + 新增 + 批量删除 -->
+        <!-- 顶部工具栏：新增 + 批量删除 -->
+        <!-- 刻意不提供搜索框：后端 rule.List 不支持 keyword 参数，放一个点了没反应的
+             输入框会误导使用者以为能搜（OCR 审查 P2-6）。要加搜索需先补
+             后端 keyword（title/name/path 模糊匹配）再放回 UI。 -->
         <div class="toolbar">
-            <el-input
-                v-model="searchKeyword"
-                :placeholder="$t('rule.searchPlaceholder')"
-                clearable
-                style="width: 280px"
-                @keyup.enter="handleSearch"
-            />
-            <el-button type="primary" @click="handleSearch">{{ $t('actions.search') }}</el-button>
             <el-button type="primary" @click="openCreateDialog">{{ $t('rule.dialog.create') }}</el-button>
             <el-button type="danger" :disabled="selectedIds.length === 0" @click="handleBatchDelete">
                 {{ $t('rule.action.batchDelete') }}
@@ -159,7 +154,6 @@ const { t } = useI18n()
 
 // --- 列表 state ---
 
-const searchKeyword = ref<string>('')
 const page = ref<number>(1)
 const pageSize = ref<number>(20)
 const total = ref<number>(0)
@@ -179,11 +173,6 @@ async function loadList() {
     } finally {
         loading.value = false
     }
-}
-
-function handleSearch() {
-    page.value = 1
-    loadList()
 }
 
 function onSelectionChange(rows: AdminRule[]) {

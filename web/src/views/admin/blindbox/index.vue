@@ -77,27 +77,48 @@ async function load() {
         const { data } = await mallBlindBoxList({ page: page.value, page_size: pageSize })
         items.value = data.items ?? []
         total.value = data.total
+    } catch (err) {
+        // 加载失败要有反馈（否则请求 reject 变成 unhandled rejection，用户只看到空表），
+        // 但**刻意不清空 items/total**：清空会把用户正在看的那一页数据抹掉，
+        // 而 page 还停在原页码，分页器会显示成「第 5 页 / 共 0 条」这种更糟的状态，
+        // 用户连翻回可用页都做不到。保留上一次的好数据，至少表还能看。
+        // 注意 request 拦截器已对 HTTP/业务错误弹过默认文案，这里不重复弹。
+        console.error('[admin/blindbox] 列表加载失败，保留上一次的数据', err)
     } finally {
         loading.value = false
     }
 }
 
-async function toggleStatus(row: MallBlindBox) {
-    await mallBlindBoxToggleStatus(row.id)
+// 三个开关（启停 / 上架 / 精选）原先都是「裸 await」：请求失败时
+// unhandled rejection 直接冒泡，既没有 ElMessage 反馈、也不会重新拉列表，
+// 结果是「本地开关已经翻过去了、后端其实没改、界面还不刷新」的假成功。
+//
+// 收敛到一个 helper 而不是复制三段 try/catch，关键差别在 await load() 的位置：
+// 它必须留在 catch **之外**。若放进同一个 try，刷新失败会被 catch 一起捕获，
+// 于是「操作其实已经成功、只是列表没刷新出来」被误报成「操作失败」。
+async function runToggle(action: () => Promise<unknown>) {
+    try {
+        await action()
+    } catch (err) {
+        console.error('[admin/blindbox] 开关操作失败', err)
+        ElMessage.error('Error')
+        return
+    }
+
     ElMessage.success('OK')
     await load()
+}
+
+async function toggleStatus(row: MallBlindBox) {
+    await runToggle(() => mallBlindBoxToggleStatus(row.id))
 }
 
 async function toggleOnSale(row: MallBlindBox) {
-    await mallBlindBoxToggleOnSale(row.id)
-    ElMessage.success('OK')
-    await load()
+    await runToggle(() => mallBlindBoxToggleOnSale(row.id))
 }
 
 async function toggleFeatured(row: MallBlindBox) {
-    await mallBlindBoxToggleFeatured(row.id)
-    ElMessage.success('OK')
-    await load()
+    await runToggle(() => mallBlindBoxToggleFeatured(row.id))
 }
 
 onMounted(load)

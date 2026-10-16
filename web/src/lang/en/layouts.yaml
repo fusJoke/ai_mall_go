@@ -49,7 +49,7 @@ leftSplitSideMenuWidth: LeftSplit secondary menu width
 nickname: Nickname
 avatar: Avatar
 save: Save
-accountLocalOnlyTip: Example data convention: profile changes only write to local state; server API to be integrated later
+accountLocalOnlyTip: "Example data convention: profile changes only write to local state; server API to be integrated later"
 restoreConfigConfirm: Are you sure you want to restore all configurations to the default values?
 restoreDefault: Restore default
 sidebarTopAndBottom: The top and bottom of the sidebar

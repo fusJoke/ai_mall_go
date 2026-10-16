@@ -28,7 +28,6 @@ manager:
 
 rule:
   title: Menu Rule
-  searchPlaceholder: Search title / name
   columns:
     id: ID
     pid: Parent
@@ -157,7 +156,7 @@ mall:
       regenerateHint: Regenerating moves the bill back to "Awaiting Confirm" with version+1; the supplier must confirm again.
       remarkPlaceholder: Regenerate note (optional)
       markPaid: Confirm Payout
-      markPaidConfirm: Pay this supplier now? This action takes effect immediately and cannot be undone:
+      markPaidConfirm: "Pay this supplier now? This action takes effect immediately and cannot be undone:"
       bill: Bill
       supplier: Supplier
       deduct: Deduct from supplier balance
@@ -246,3 +245,7 @@ mall:
       items: Items
       orderCount: Order Count
       orders: Linked Orders
+
+# admin layout container i18n (iframe view protocol allowlist rejection hint).
+layout:
+  iframeBlocked: This menu URL is not allowed to load (only http / https is supported). Please check the menu configuration.

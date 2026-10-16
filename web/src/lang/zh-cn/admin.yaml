@@ -30,7 +30,6 @@ manager:
 
 rule:
   title: 菜单规则
-  searchPlaceholder: 搜索标题 / 名称
   columns:
     id: ID
     pid: 上级规则
@@ -248,3 +247,7 @@ mall:
       items: 结算明细
       orderCount: 订单数
       orders: 关联订单
+
+# admin 布局容器 i18n（iframe 视图协议白名单拒绝提示）。
+layout:
+  iframeBlocked: 该菜单地址不被允许加载（仅支持 http / https）。请检查菜单配置。
