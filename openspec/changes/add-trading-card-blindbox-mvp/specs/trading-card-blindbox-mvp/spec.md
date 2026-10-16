@@ -631,13 +631,58 @@ admin SHALL 能通过 `POST /api/v1/admin/settlements/:id/mark_paid` 标记结�
 
 索引：`(status, start_at, end_at)` —— 查"当前生效的秒杀活动"
 
-#### Scenario: Seckill activity creation initializes Redis
+#### Scenario: redis_initialized starts as false on creation
 - **WHEN** 供应商创建 seckill 活动，total_stock=100，per_user_limit=1
-- **THEN** 同一事务内 SET seckill:stock:{new_id} = 100 + UPDATE redis_initialized=true；DB 与 Redis 一致
+- **THEN** 插入行的 `redis_initialized` 初值 MUST 为 0（false）
+- **AND** 该列 MUST 由 Redis 初始化流程置为 1，MUST NOT 在创建语句里直接写入 1
+
+> 原表述为「同一事务内 SET seckill:stock + UPDATE redis_initialized=true」。Redis 无法参与 MySQL 事务，
+> 该表述在实现上不可能成立。创建与初始化的完整语义（含失败回滚）见
+> 「Seckill activity creation and Redis initialization」。
 
 #### Scenario: Seckill rejects when card pool stock insufficient
 - **WHEN** 创建秒杀活动时 mall_card_pool_items 总 stock < total_stock
 - **THEN** 返回 `ErrSeckillStockExceedsPool` (HTTP 422)，DB 不写入
+
+---
+
+### Requirement: Seckill activity creation and Redis initialization
+
+供应商创建秒杀活动 SHALL 分两段完成，MUST NOT 假设 Redis 能参与 MySQL 事务：
+
+1. **DB 段（事务内）**：校验卡池总库存 ≥ `total_stock` 后 INSERT `mall_seckill_activities`，`redis_initialized=0`；提交。
+2. **Redis 段（提交后）**：以 `SETNX` 抢占初始化锁防并发重复初始化 → `SET seckill:stock:{id} = total_stock` → 置 `redis_initialized=1`。
+
+Redis 段任一步失败时，已创建的 DB 行 MUST 被**回滚清除（真删除）**，MUST NOT 仅做同值更新。
+判据：残留 `redis_initialized=0` 的活动既因唯一键冲突无法被重试覆盖，又因秒杀预校验要求
+`redis_initialized=true` 而永远不参与秒杀 —— 是一行既不可用、也不可自愈的孤儿数据。
+
+回滚本身失败 MUST 记 ERROR 日志，且 MUST NOT 掩盖原始错误（原始错误才是根因）。
+
+#### Scenario: Redis initialization failure removes the created activity
+
+- **WHEN** DB 段提交成功，但 Redis 段的 SETNX / SET stock / 置 `redis_initialized` 任一步失败
+- **THEN** 该活动行 MUST 被删除
+- **AND** `mall_seckill_activities` 中 MUST NOT 残留 `redis_initialized=0` 的行
+- **AND** 接口 MUST 返回错误，MUST NOT 报告创建成功
+
+#### Scenario: Rollback failure does not mask the original error
+
+- **WHEN** 清除已创建活动时本身失败（DB 异常）
+- **THEN** MUST 记 ERROR 日志说明回滚失败
+- **AND** 返回调用方的 MUST 是 Redis 段的原始错误，MUST NOT 被清除操作的错误替换
+
+#### Scenario: Successful creation leaves DB and Redis consistent
+
+- **WHEN** 两段都成功
+- **THEN** `redis_initialized=1` 且 `seckill:stock:{id}` = `total_stock`
+- **AND** 该活动 MUST 能通过秒杀下单的预校验（`status='active' AND redis_initialized=true`）
+
+#### Scenario: No preheat when creation is rolled back
+
+- **WHEN** Redis 初始化失败、已创建活动被回滚清除
+- **THEN** MUST NOT 触发该活动的缓存预热（与「Cache preheat on promotion/seckill creation」的交互）
+- **AND** MUST NOT 为已删除的活动留下 `seckill:stock:*` / 预热类缓存键
 
 ---
 
@@ -796,12 +841,36 @@ publish 失败 SHALL 仅记录 warn 日志，不影响业务主路径（cron 兜
 
 ---
 
+### Requirement: Draw transaction publishes stock deduction event
+
+抽卡事务（`source=normal`）提交后 SHALL 向 `stock.deduction.sync` 发布一条库存同步事件，
+与秒杀路径共用同一 topic 与同一消费端。
+
+payload 的 `id` 字段 MUST 是 `mall_stock_deduction_logs.id`，MUST NOT 是 `mall_draw_orders.id`。
+判据：两张表的 `id` 是**两套相互独立的自增序列**，取错会让消费端 `UPDATE ... WHERE id=?` 恒 0 行 ——
+而 0 行若被一律当作「已同步」静默 ack，整条库存同步链路会退化为空操作且不报错。
+
+发布 MUST 在事务提交后进行且不阻塞响应；发布失败 SHALL 仅记 warn 日志，由 cron 兜底补齐（同秒杀路径）。
+
+#### Scenario: Draw success publishes the deduction log id
+
+- **WHEN** 普通抽卡事务成功提交
+- **THEN** 消息 payload 中的 `id` MUST 等于该次事务内新插入的 `mall_stock_deduction_logs.id`
+- **AND** MUST NOT 等于 `mall_draw_orders.id`
+
+#### Scenario: Publish failure does not affect the draw result
+
+- **WHEN** 发布消息失败（MQ 不可达）
+- **THEN** 抽卡事务结果 MUST NOT 受影响（已提交），仅记 warn
+- **AND** 该条 `synced_to_pool_at IS NULL` 的记录 MUST 能被 cron 兜底扫到
+
+---
+
 ### Requirement: cmd/stock-sync consumer mode
 
-`cmd/stock-sync` SHALL 作为消费者进程运行，订阅 `stock.deduction.sync` topic：
+`cmd/stock-sync` SHALL 作为消费者进程运行，订阅 `stock.deduction.sync` topic：收到消息后解析 payload 中的 id（= `mall_stock_deduction_logs.id`），执行 `UPDATE mall_stock_deduction_log SET synced_to_pool_at=NOW() WHERE id=?`；失败则返回 err、不 ack、下次重试。
 
-- handler 收到消息 → 解析 seckill_id / log_id → UPDATE `mall_stock_deduction_log SET synced_to_pool_at=NOW() WHERE id=?`
-- 失败：handler 返回 err → 不 ack → 下次重试
+UPDATE 影响 0 行时 MUST 区分「幂等重投」与「id 不存在」，MUST NOT 一律视为「已同步」。后者属生产端传错 id，MUST 记 WARN 使问题可从日志暴露；用于区分的探测查询本身失败时 MUST 不 ack。
 
 #### Scenario: Consumer processes message
 - **WHEN** 新消息到达 `stock.deduction.sync` topic
@@ -810,6 +879,19 @@ publish 失败 SHALL 仅记录 warn 日志，不影响业务主路径（cron 兜
 #### Scenario: Consumer failure retains pending
 - **WHEN** handler 返回 err（DB 异常）
 - **THEN** 消息保留在 pending list，下次 `XREADGROUP` 重试
+
+#### Scenario: Idempotent redelivery acks normally
+- **WHEN** 消息中的 id 存在，但 `synced_to_pool_at` 已非 NULL（重复投递）
+- **THEN** handler MUST 正常 ack，MUST NOT 报错或重复告警
+
+#### Scenario: Zero rows caused by a nonexistent id is reported
+- **WHEN** 消息中的 id 在 `mall_stock_deduction_logs` 中不存在（生产端传错 id）
+- **THEN** MUST 记 WARN 日志指明「id 不存在」
+- **AND** MUST NOT 静默当作「已同步」处理
+
+#### Scenario: Probe failure does not ack
+- **WHEN** 为区分上述两种情况而执行的探测查询本身失败
+- **THEN** handler MUST 返回 err，MUST NOT ack
 
 ---
 

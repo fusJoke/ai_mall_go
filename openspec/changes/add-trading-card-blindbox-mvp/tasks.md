@@ -269,3 +269,15 @@
 - [ ] 18.10 修改 `internal/service/supplier/seckill.go` 的 Create：事务 COMMIT 后 `go preheat.SeckillPreheat(s)`
 - [ ] 18.11 前端：用户中心新增"我的关注"页面；盲盒详情页"关注卡商"按钮
 - [ ] 18.12 单测：JitterTTL 在范围内；预热失败不影响主业务
+
+## 19. 严重缺陷回归修复（2026-10-16，代码已提交）
+
+> 由《严重Bug评估与修复方案-2026-10-16》驱动。属对本 change 既有实现的修复，
+> 契约面已同步至本目录的 spec delta（新增 2 条需求 + 修正 2 处表述）。
+
+- [x] 19.1 秒杀创建：Redis 初始化失败时**真删除**已创建活动。原实现调 `Update`（其实现是 `Save(s)` 全字段同值 upsert，`deleted_at` 仍为 NULL），会残留 `redis_initialized=false` 的孤儿活动 —— 既因唯一键冲突无法重试，又永远过不了秒杀预校验；新增 repo `Delete`
+- [x] 19.2 秒杀创建：三处失败分支（SETNX 报错 / 抢锁失败 / 置 `redis_initialized` 失败）统一收敛到回滚路径；回滚失败记 ERROR 且**不掩盖原始错误**
+- [x] 19.3 抽卡事务：MQ payload 的 id 改用 `mall_stock_deduction_logs.id`。原传 `mall_draw_orders.id` —— 两套独立自增序列，消费端 `UPDATE ... WHERE id=?` 恒 0 行，且 0 行被当作「已同步」静默 ack，整条同步链路是空操作且不报错
+- [x] 19.4 `cmd/stock-sync` 消费端：0 行时用存在性探测区分「幂等重投」（正常 ack）与「id 不存在」（记 WARN）；探测本身失败则不 ack
+- [x] 19.5 spec 同步：新增「Seckill activity creation and Redis initialization」「Draw transaction publishes stock deduction event」两条需求；修正 consumer mode 的 0 行语义；修正 seckill schema 中「同一事务内 SET Redis 库存」这一在实现上不可能的表述
+- [x] 19.6 单测：`seckill_test` 断言回滚确实删除（`deleteCalls==1`、`lastDeleteID` 正确、`updateCalls==0`），并覆盖三种失败注入点；`draw_test` / `order_test` 桩补 `UpdateStatusCAS`
