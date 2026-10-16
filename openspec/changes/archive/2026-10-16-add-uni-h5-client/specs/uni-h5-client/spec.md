@@ -313,7 +313,7 @@
 
 ### Requirement: 本地 Mock 层开关与边界
 
-客户端 MUST 提供统一的 mock 开关（默认开启），用于在真实登录接口就绪前替代登录页交互。
+客户端 MUST 提供统一的 mock 开关，且 MUST 默认**关闭**：仅当显式声明 `VITE_USE_MOCK=true` 时开启。未配置、变量缺失或取值非法（含拼写错误）MUST 一律判定为关闭 —— 判据是「显式等于 true 才开」，MUST NOT 采用「不等于 false 就开」这类在配置缺失时倾向开启的写法。
 
 mock 覆盖范围 MUST 严格限于登录相关的界面交互及其配套接口：发送短信验证码、滑块验证码创建与校验、手机号登录。商品 feed、盲盒详情、抽卡下单、订单列表、订单详情与当前用户信息 MUST 走真实后端，MUST NOT 被 mock 拦截。
 
@@ -378,3 +378,47 @@ mock 的响应结构 MUST 与真实接口契约一致，切换开关后业务代
 
 - **WHEN** 审查订单状态、下单来源或抽卡错误码的文案来源
 - **THEN** 映射关系 MUST 定义在单一常量表中
+
+### Requirement: 生产构建卫生
+
+开发期配置 MUST NOT 出现在生产构建产物中。该约束由构建期校验、运行期断言、产物扫描三道**相互独立**的防线共同承担，任一道单独失效时其余防线 MUST 仍能拦截。
+
+构建期校验 MUST 按**变量名**判定，`VITE_USE_MOCK=true` 或非空 `VITE_DEV_TOKEN` 命中即拒绝构建 —— 这是唯一可行的拦截位置：`import.meta.env.*` 在构建期被静态内联，产物中事后不可辨。产物扫描 MUST 独立于构建流程，不依赖构建是否成功。
+
+#### Scenario: 脏配置的构建被拒绝
+
+- **WHEN** 生产构建所处环境存在 `VITE_USE_MOCK=true` 或非空 `VITE_DEV_TOKEN`
+- **THEN** 构建 MUST 以非零退出码失败，并输出命中的变量名与正确做法
+- **AND** MUST NOT 产出可部署产物
+
+#### Scenario: 三道防线相互独立
+
+- **WHEN** 绕过构建期校验产出了含开发期配置的产物
+- **THEN** 运行期断言 MUST 拦截，中止启动或降级
+- **AND** 产物扫描 MUST 独立报出问题，MUST NOT 依赖构建期是否已拦截
+
+#### Scenario: 产物扫描必须能失败
+
+- **WHEN** 产物目录为空、不存在或不可读
+- **THEN** 扫描 MUST 以非零退出码失败，MUST NOT 输出「扫描 0 个文件 = 通过」
+- **AND** 失败原因 MUST 区分「目录不存在」与「目录存在但无文件」
+
+#### Scenario: 凭证泄漏可被发现
+
+- **WHEN** 产物中被人为注入一个符合令牌形状的字符串
+- **THEN** 扫描 MUST 失败并指出所在文件
+- **AND** 输出中命中的令牌 MUST 被掩码，MUST NOT 完整回显
+
+### Requirement: 开发期环境文件分层
+
+开发期变量 MUST 存放于**仅开发模式加载**的环境文件（`.env.development.local`），MUST NOT 存放于 `.env` 或 `.env.local` —— Vite 在生产构建中同样加载后两者，令牌会被明文内联进产物 JS。各环境文件的加载时机与用途 MUST 在工程 README 中以表格写明。
+
+#### Scenario: 令牌不进生产包
+
+- **WHEN** 按约定把开发令牌写入 `.env.development.local` 后执行生产构建
+- **THEN** `.js` / `.css` 产物中 MUST NOT 出现该令牌
+
+#### Scenario: 误放位置会被拦截
+
+- **WHEN** 令牌被误写入 `.env` 或 `.env.local`
+- **THEN** 该次生产构建 MUST 被构建期校验拒绝
