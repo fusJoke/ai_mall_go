@@ -262,29 +262,96 @@
   - 删叶规则 → 软删成功；
   - 批量删除混合选中 → 仅叶规则被删。
   验证：浏览器目测 + curl 双验证。
-  验证记录（2026-10-16，`go run ./cmd/serve` @:8080 + curl）：**后端 8 项全部通过，前端不可用 —— 本 change 暂不具备归档条件**。
 
-  **后端（已实测通过）**：list / all → 200；create → 落库字段与请求一致；
-  鉴权矩阵：无 token → 401、user token → 401 `auth.token_type_mismatch`、admin token → 200；
-  PID 自循环 → 400 `rule.edit.pid_cycle`；toggle-status → 200 且 status 1→0；
-  删有子规则 → 400 `rule.delete.has_children`；删叶 → 200；再删父 → 200；删不存在 id → 200（幂等）；
-  batch-delete `[父,子,不存在]` → `{"deleted":1,"skipped":2}`。
+  ---
+  **验证记录 v1（2026-10-16，`go run ./cmd/serve` @:8080 + curl）：后端 8 项通过；前端被 JSON 字段名契约阻塞。**
 
-  **阻塞（前端）**：`internal/model/admin.go` 的 `AdminRule` **没有任何 json tag**，接口实际返回 Go 字段名
-  （`ID` / `Pid` / `Title` / `Status` / `UpdatedAt` …），而 `web/src/api/rule.ts` 的类型签名与
-  `web/src/views/admin/rule/index.vue` 的模板/逻辑全部按 snake_case 消费
-  （`prop="id"` / `prop="title"` / `row.status` / `row.updated_at`；api 注释也写着「含 JSON 蛇形 tag」，
-  与实际不符）。`web/src/utils/request.ts` 的响应拦截器只做信封解包，不做 key 转换。
-  实测：对 `/admin/rule/list` 响应按前端路径取值，`row.id` / `row.title` / `row.status` / `row.updated_at`
-  命中 **0/4**；`openEditDialog(row)` 取到的 `row.id` 为 `undefined`
-  → `GET /admin/rule/edit?id=undefined` 返回 400 `invalid id`。
-  后果：表格各列全空、`row-key` 失效、编辑/启停/删除按钮均拿不到 id，页面对用户实际不可用。
-  → 需先统一 JSON 字段命名契约（后端补 json tag，或前端 api 层做 key 映射），再重跑 9.6。
+  - 后端（实测通过）：list / all → 200；create → 落库字段与请求一致；
+    鉴权矩阵：无 token → 401、admin token → 200；
+    PID 自循环 → 400 `rule.edit.pid_cycle`；toggle-status → 200 且 status 1→0；
+    删有子规则 → 400 `rule.delete.has_children`；删叶 → 200；再删父 → 200；删不存在 id → 200（幂等）。
+  - 阻塞项：`internal/model/admin.go` 的 `AdminRule` 无 json tag → 接口返回 Go 字段名，
+    前端按 snake_case 取值命中 0/4，`openEditDialog` 拿到 `row.id=undefined`。
+  - **已于同日修复**：`internal/model/{admin,user,config,captcha,common}.go` 补 91 个 snake_case
+    json tag（commit `578f0e7`）。
 
-  **另记（接口语义，非本 change 引入）**：`RuleHandler.EditPost` 为**全量更新**语义（`ShouldBindJSON`
-  绑定整个 `model.AdminRule` 后 `svc.Update`），只传部分字段会把 `created_at` 写成零值，
-  MySQL 严格模式报 `Error 1292: Incorrect datetime value: '0000-00-00'` → HTTP 500。
-  前端 `submitForm` 提交的字段集不含 `created_at`，故即便字段名对齐，编辑也会 500；
-  修复须一并处理（改 PATCH 语义 / `update_columns`，或前端回传完整对象）。
+  ---
+  **验证记录 v2（2026-10-16，json tag 修复后复验）——字段名契约已解除，但暴露 4 条真缺陷，仍不具备归档条件。**
+
+  环境：Docker `mysql-master` @3307 / `mysql-slave` @3308 / `redis` / `es`，
+  `./tmp/serve.exe` @:8080，自造 admin token（`tokens` 表存 `sha256(raw)`）。
+  脚本：`C:\Users\Public\verify_96.py`（29 项断言，逐项打印证据）。
+
+  - **① 字段名契约：已解除（本次修复的核心验收点）**
+    `/admin/rule/list` 响应 key 集合与 `web/src/api/rule.ts: AdminRule` 声明的 17 个字段
+    **全部命中**（修复前 0/17）；无任何含大写字母的 Go 字段名泄漏；
+    样例：`{"id":1,"pid":0,"type":"menu","title":"管理员账号","open_type":null,...,"updated_at":"..."}`。
+    `row.id` / `row.title` / `row.name` / `row.status` / `row.updated_at` 均可取到值。
+    `/admin/rule/all` 的 item 含 `id`/`pid`/`title`/`type`（树选择器所需）。
+    唯一额外字段是 `deleted_at`（GORM 软删列，前端未声明、不需要）。
+
+  - **② 复验新发现：4 条真缺陷（均为本 change 声明过的行为未实现 / 实现错）**
+
+    | # | 缺陷 | spec 依据 | 真机实测 |
+    |---|---|---|---|
+    | D1 | `GET /admin/rule/list` 的 `?title=` / `?name=` **过滤完全无效**，恒返回全量 | `Admin can list and search menu rules`：MUST accept `?title=` / `?name=`；scenario `Filtered by title` | `?name=zzz_nonexistent` → `total=21`（= 全量）；`?title=zzz_nonexistent` → `total=21` |
+    | D2 | `POST /admin/rule/create` **无 title / name 非空校验** | `Admin can create a new menu rule`：MUST reject 空 `title` 或 空 `name`；scenario `Empty title rejected` | `{title:"", name:"x…"}` → **HTTP 200** 且落库（id=21，`SELECT` 确认 `title=''`） |
+    | D3 | `POST /admin/rule/create` / `edit` 的 **PID 存在性校验在真机上失效** | `PID references non-existent rule`：→ 4xx `rule.create.pid_not_found` | `{pid:999999,…}` → **HTTP 200** 且落库（id=22，`pid=999999` 孤儿节点） |
+    | D4 | `POST /admin/rule/toggle-status` 成功响应**不含新 status** | `Admin can toggle a menu rule's status`：success MUST contain the new `status` | 响应体为 `{"code":"rule.toggle_status.ok","message":"ok"}`，无 `status` 字段 |
+
+    **D1 / D2 / D4 根因（已定位到代码）**：
+    - D1 —— **搜索功能未实现**：`internal/repository/base.go:37 ListOptions` 只有 `Page`/`PageSize`；
+      `internal/handler/base.go:181 parseListOptions` 只解析 `page` / `page_size`，
+      `title` / `name` 从未被读取，service / repo 层也没有 `LIKE` 查询。
+    - D2 —— handler 的 `Create` 与 service 的 `Create` 都只做 PID 校验，
+      没有 title / name 非空分支（`internal/handler/admin/rule.go:180`、
+      `internal/service/admin/rule.go:136`）。
+    - D4 —— `internal/handler/admin/rule.go:89` 直接回 `{"code":...,"message":"ok"}`，
+      未回读并返回切换后的 `status`。
+
+    **D3 根因（已定位到代码）**：`internal/repository/admin/rule_repository.go:201 GetPID`    用 `Pluck("pid", &pid)`。GORM 的 `Pluck` 在**查不到行时不返回 `gorm.ErrRecordNotFound`**
+    （只留零值 + `err=nil`），因此 `internal/service/admin/rule.go:104` 的
+    `errors.Is(err, gorm.ErrRecordNotFound) → ErrPIDNotFound` 分支**在真机路径永远不可达**；
+    `ValidatePID` 拿到的 `firstPID=0` 使 `for cur != 0` 立即退出 → 返回 nil（放行）。
+    同一坑在 `HasChildren`（同文件 :219 亦用 `Pluck`）上**恰好不触发**，因为那里判据是
+    `one != 0` 而非错误类型。
+    → **单测为何没拦住**：`internal/handler/admin/rule_test.go:287` 与
+    `internal/repository/admin/rule_repository_test.go:161` 均用 sqlmock，由测试**自己**
+    指定返回 `gorm.ErrRecordNotFound`，而真机 `Pluck` 根本不会产生该错误 ——
+    属「mock 场景不真实导致的假绿」，需补一条真连库（或改用 `First`/`Scan` 语义）的对照测试。
+
+  - **③ 另一类：读写分离导致的读后写时序不一致（非本 change 引入，但会让本 change 不可稳定验证）**
+
+    `.env.yaml` 的 `database.read.enabled: true` → 读走 3308 从库、写走 3307 主库。
+    `GetByID` / `HasChildren` 是 SELECT（走从库），软删是 UPDATE（主库）。
+    异步复制在**毫秒级窗口**内让刚写入 / 刚软删的行在从库不可见，于是同一用例出现**两个方向**的错误：
+
+    | 用例 | 从库读 ON | 从库读 OFF（对照实验） |
+    |---|---|---|
+    | `batch-delete [父(有子), 叶子, 不存在]` | ❌ `{"deleted":2,"skipped":1}`（**有子的父被误删**） | ✅ `{"deleted":1,"skipped":2}` |
+    | 删掉子规则后立刻删父 | ❌ `400 rule.delete.has_children`（**父删不掉**） | ✅ `200` |
+    | 上面 4 条真缺陷（D1–D4） | ❌ 全部复现 | ❌ **全部原样复现** |
+
+    对照实验：`read.enabled` 置 `false` 重启后，只有这两条时序相关用例由 FAIL 转 PASS，
+    D1–D4 一条不少 —— 干净地把「环境时序抖动」与「真实实现缺陷」分离。
+    从库本身健康（`Slave_IO_Running`/`Slave_SQL_Running` = Yes，`Seconds_Behind_Master=0`），
+    该指标是秒级粒度，看不见毫秒级窗口，故不能据它排除。
+    影响面是**全局的**（所有走 `CRUDRepository` 的实体同此模式），建议独立起 change 处理：
+    写后读一致性（会话级强制走主库 / `dbresolver` 按事务路由 / 关键判定改为主库读）。
+    **结论：本轮 D1–D4 的判定不受它影响**（对照实验已证明）。
+
+  - **④ 保留（接口语义，非本 change 引入）**：`RuleHandler.EditPost` 为**全量更新**语义
+    （`ShouldBindJSON` 绑定整个 `model.AdminRule` 后 `svc.Update` = GORM `Save`），
+    只传部分字段会把 `created_at` 写成零值，
+    MySQL 严格模式报 `Error 1292: Incorrect datetime value: '0000-00-00'` → HTTP 500。
+    本轮按「先 GET 完整行 → 改 title → 全量回写」模拟前端真实行为时通过
+    （`updated_at` 正常刷新）；但前端 `submitForm` 提交的字段集不含 `created_at`，
+    **故字段名对齐后编辑仍会 500**，修复须与 D1–D4 一并处理。
+
+  **结论：9.6 不勾选 —— 需先修 D1–D4（含 D3 的 mock 假绿问题），再重跑本项。**
+
+  **清理**：验证过程中在 `admin_rule` 造了 25 行测试数据（id 14–38），已硬删；
+  误改的种子行 id=1 `title` 已复原为「管理员账号」，6 条种子行（id 1–6）核对无误。
+  `.env.yaml` 的 `read.enabled` 对照实验后已还原为 `true`。
 
   备注（原）：9.5 / 9.6 需要 MySQL + 启动 dev server，当前沙箱无 MySQL，留给用户本地或 CI 验证。
