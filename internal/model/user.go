@@ -24,56 +24,56 @@ import (
 // 字段顺序：业务字段在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type User struct {
 	// ID 用户主键。
-	ID int64 `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID int64 `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Username 用户名，全局唯一。
-	Username string `gorm:"comment:用户名;size:64;uniqueIndex;not null"`
+	Username string `json:"username" gorm:"comment:用户名;size:64;uniqueIndex;not null"`
 
 	// Nickname 昵称，留空表示未设置。
-	Nickname string `gorm:"comment:昵称;size:64"`
+	Nickname string `json:"nickname" gorm:"comment:昵称;size:64"`
 
 	// Avatar 头像 URL，留空表示未设置。
-	Avatar string `gorm:"comment:头像URL;size:255"`
+	Avatar string `json:"avatar" gorm:"comment:头像URL;size:255"`
 
 	// Mobile 手机号，全局唯一；nil 表示未填写。
-	Mobile *string `gorm:"comment:手机号;size:20;uniqueIndex"`
+	Mobile *string `json:"mobile" gorm:"comment:手机号;size:20;uniqueIndex"`
 
 	// Email 邮箱；nil 表示未填写（不再要求唯一，改为普通索引覆盖查找）。
-	Email *string `gorm:"comment:邮箱;size:128;index"`
+	Email *string `json:"email" gorm:"comment:邮箱;size:128;index"`
 
 	// Balance 余额（元，decimal(12,2)）。抽卡事务内条件扣减，保证不超额。
-	Balance float64 `gorm:"comment:余额(元);type:decimal(12,2);not null;default:0"`
+	Balance float64 `json:"balance" gorm:"comment:余额(元);type:decimal(12,2);not null;default:0"`
 
 	// Status 账号状态：1 启用 / 0 禁用。
-	Status int8 `gorm:"comment:状态(1启用,0禁用);default:1;not null"`
+	Status int8 `json:"status" gorm:"comment:状态(1启用,0禁用);default:1;not null"`
 
 	// LastLoginAt 最后登录时间；nil 表示从未登录。
-	LastLoginAt *time.Time `gorm:"comment:最后登录时间"`
+	LastLoginAt *time.Time `json:"last_login_at" gorm:"comment:最后登录时间"`
 
 	// LastLoginIp 最后登录 IP（兼容 IPv6，最长 45 字符）。
-	LastLoginIp string `gorm:"comment:最后登录IP;size:45"`
+	LastLoginIp string `json:"last_login_ip" gorm:"comment:最后登录IP;size:45"`
 
 	// LoginFailure 累计登录失败次数，达到阈值后锁定账号。
-	LoginFailure int `gorm:"comment:登录失败次数;default:0;not null"`
+	LoginFailure int `json:"login_failure" gorm:"comment:登录失败次数;default:0;not null"`
 
 	// Password 哈希后的密码（bcrypt / argon2 等，长度预留 255）。
-	Password string `gorm:"comment:密码(已哈希);size:255;not null;default:''"`
+	Password string `json:"password" gorm:"comment:密码(已哈希);size:255;not null;default:''"`
 
 	// RegisterSource 注册来源：h5_mobile（H5 手机号自动建号）/ admin（后台预建）
 	// / import（数据导入）等；nil 表示未知或历史数据（存量用户未回填）。
 	//
 	// 由 migration 000017 引入。本期仅落结构与字段，写入逻辑随
 	// POST /user/login/mobile 的服务端实现落地。
-	RegisterSource *string `gorm:"comment:注册来源(h5_mobile/admin/import等,NULL=未知);size:16"`
+	RegisterSource *string `json:"register_source" gorm:"comment:注册来源(h5_mobile/admin/import等,NULL=未知);size:16"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口，让 GORM 把 "users"

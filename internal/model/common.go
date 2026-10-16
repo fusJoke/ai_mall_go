@@ -26,30 +26,30 @@ import (
 // 字段顺序：业务字段在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type Token struct {
 	// ID 令牌主键。
-	ID int64 `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID int64 `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Token 哈希后的 token 值（SHA256 hex，64 字符），全局唯一；
 	// 明文不会落库，校验时同样哈希入参再 Where 查询。
-	Token string `gorm:"comment:令牌哈希(SHA256);size:128;uniqueIndex;not null"`
+	Token string `json:"token" gorm:"comment:令牌哈希(SHA256);size:128;uniqueIndex;not null"`
 
 	// Type token 用途标识，例如 "admin"、"user"、"refresh"；
 	// 配合 UserID 形成复合索引，便于按"用户 + 用途"批量清理。
-	Type string `gorm:"comment:令牌类型;size:32;index:idx_user_type,priority:2;not null"`
+	Type string `json:"type" gorm:"comment:令牌类型;size:32;index:idx_user_type,priority:2;not null"`
 
 	// UserID 所属用户主键（admin.id / user.id 等，跨身份统一为 int64）。
-	UserID int64 `gorm:"comment:用户ID;index:idx_user_type,priority:1;not null"`
+	UserID int64 `json:"user_id" gorm:"comment:用户ID;index:idx_user_type,priority:1;not null"`
 
 	// ExpiresAt token 过期时间；Manager.Check 在 Get 之后判断是否早于当前时间。
-	ExpiresAt time.Time `gorm:"comment:过期时间;not null"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"comment:过期时间;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，

@@ -23,49 +23,49 @@ import (
 // 字段顺序按业务字段在前、时间戳字段在后排列，UpdatedAt → CreatedAt → DeletedAt 收尾。
 type Admin struct {
 	// ID 管理员主键。
-	ID int64 `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID int64 `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Username 用户名，全局唯一。
-	Username string `gorm:"comment:用户名;size:64;uniqueIndex;not null"`
+	Username string `json:"username" gorm:"comment:用户名;size:64;uniqueIndex;not null"`
 
 	// Nickname 昵称，可重复，留空表示未设置。
-	Nickname string `gorm:"comment:昵称;size:64"`
+	Nickname string `json:"nickname" gorm:"comment:昵称;size:64"`
 
 	// Avatar 头像 URL，留空表示未设置。
-	Avatar string `gorm:"comment:头像URL;size:255"`
+	Avatar string `json:"avatar" gorm:"comment:头像URL;size:255"`
 
 	// Email 邮箱，全局唯一；nil 表示未填写（指针类型以支持 NULL）。
-	Email *string `gorm:"comment:邮箱;size:128;uniqueIndex"`
+	Email *string `json:"email" gorm:"comment:邮箱;size:128;uniqueIndex"`
 
 	// Mobile 手机号，全局唯一；nil 表示未填写（指针类型以支持 NULL）。
-	Mobile *string `gorm:"comment:手机号;size:20;uniqueIndex"`
+	Mobile *string `json:"mobile" gorm:"comment:手机号;size:20;uniqueIndex"`
 
 	// LoginFailure 累计登录失败次数，达到阈值后锁定账号。
-	LoginFailure int `gorm:"comment:登录失败次数;default:0;not null"`
+	LoginFailure int `json:"login_failure" gorm:"comment:登录失败次数;default:0;not null"`
 
 	// LastLoginAt 最后登录时间；nil 表示从未登录。
-	LastLoginAt *time.Time `gorm:"comment:最后登录时间"`
+	LastLoginAt *time.Time `json:"last_login_at" gorm:"comment:最后登录时间"`
 
 	// LastLoginIp 最后登录 IP（兼容 IPv6，最长 45 字符）；留空表示从未登录。
-	LastLoginIp string `gorm:"comment:最后登录IP;size:45"`
+	LastLoginIp string `json:"last_login_ip" gorm:"comment:最后登录IP;size:45"`
 
 	// Password 哈希后的密码（bcrypt / argon2 等，长度预留 255）。
-	Password string `gorm:"comment:密码(已哈希);size:255;not null"`
+	Password string `json:"password" gorm:"comment:密码(已哈希);size:255;not null"`
 
 	// Bio 个人简介，留空表示未填写。
-	Bio string `gorm:"comment:个人简介;size:500"`
+	Bio string `json:"bio" gorm:"comment:个人简介;size:500"`
 
 	// Status 账号状态：1 启用 / 0 禁用。
-	Status int8 `gorm:"comment:状态(1启用,0禁用);default:1;not null"`
+	Status int8 `json:"status" gorm:"comment:状态(1启用,0禁用);default:1;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，
@@ -134,59 +134,59 @@ const (
 // 字段顺序：业务字段在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type AdminRule struct {
 	// ID 主键（SQL: int UNSIGNED）。
-	ID uint `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID uint `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Pid 上级规则 ID；0 表示顶级，构成"规则树"。
-	Pid uint `gorm:"comment:上级规则;default:0;not null;index"`
+	Pid uint `json:"pid" gorm:"comment:上级规则;default:0;not null;index"`
 
 	// Type 规则类型：RuleTypeDir=规则目录 / RuleTypeMenu=菜单项 / RuleTypeNode=权限节点。
-	Type AdminRuleType `gorm:"comment:规则类型(dir=规则目录,menu=菜单项,node=权限节点);size:16;default:'menu';not null"`
+	Type AdminRuleType `json:"type" gorm:"comment:规则类型(dir=规则目录,menu=菜单项,node=权限节点);size:16;default:'menu';not null"`
 
 	// Title 规则标题，用于后台菜单显示。
-	Title string `gorm:"comment:规则标题;size:50;default:'';not null"`
+	Title string `json:"title" gorm:"comment:规则标题;size:50;default:'';not null"`
 
 	// Name 规则名称（英文标识 / 权限点 key）。
-	Name string `gorm:"comment:规则名称;size:50;default:'';not null"`
+	Name string `json:"name" gorm:"comment:规则名称;size:50;default:'';not null"`
 
 	// Path 菜单路由路径（前端 router 配置）。
-	Path string `gorm:"comment:菜单路由路径;size:100;default:'';not null"`
+	Path string `json:"path" gorm:"comment:菜单路由路径;size:100;default:'';not null"`
 
 	// Icon 图标（lucide 等图标库的图标名）。
-	Icon string `gorm:"comment:图标;size:50;default:'';not null"`
+	Icon string `json:"icon" gorm:"comment:图标;size:50;default:'';not null"`
 
 	// OpenType 菜单打开方式：RuleOpenTab=选项卡 / RuleOpenLink=链接 / RuleOpenIframe=Iframe；
 	// 可空：nil 表示"不适用"（如纯权限节点 type=node 不需要此项）。
-	OpenType *AdminRuleOpenType `gorm:"comment:菜单打开方式(tab=选项卡,link=链接,iframe=Iframe);size:16"`
+	OpenType *AdminRuleOpenType `json:"open_type" gorm:"comment:菜单打开方式(tab=选项卡,link=链接,iframe=Iframe);size:16"`
 
 	// Url 菜单 URL（外链 / 实际跳转地址）。
-	Url string `gorm:"comment:菜单URL;size:255;default:'';not null"`
+	Url string `json:"url" gorm:"comment:菜单URL;size:255;default:'';not null"`
 
 	// Component 菜单组件路径（前端组件文件路径）。
-	Component string `gorm:"comment:菜单组件路径;size:100;default:'';not null"`
+	Component string `json:"component" gorm:"comment:菜单组件路径;size:100;default:'';not null"`
 
 	// Keepalive 是否缓存该路由页面：true=开启 / false=关闭。
-	Keepalive bool `gorm:"comment:缓存(0=关闭,1=开启);default:false;not null"`
+	Keepalive bool `json:"keepalive" gorm:"comment:缓存(0=关闭,1=开启);default:false;not null"`
 
 	// Extend 扩展属性：RuleExtendNone=无 / RuleExtendAddRouteOnly=只添加为路由 / RuleExtendAddMenuOnly=只添加为菜单。
-	Extend AdminRuleExtend `gorm:"comment:扩展属性(none=无,add_route_only=只添加为路由,add_menu_only=只添加为菜单);size:32;default:'none';not null"`
+	Extend AdminRuleExtend `json:"extend" gorm:"comment:扩展属性(none=无,add_route_only=只添加为路由,add_menu_only=只添加为菜单);size:32;default:'none';not null"`
 
 	// Remark 备注。
-	Remark string `gorm:"comment:备注;size:255;default:'';not null"`
+	Remark string `json:"remark" gorm:"comment:备注;size:255;default:'';not null"`
 
 	// Weigh 权重，列表按 weigh DESC 排序（小者靠前）。
-	Weigh int `gorm:"comment:权重;default:0;not null"`
+	Weigh int `json:"weigh" gorm:"comment:权重;default:0;not null"`
 
 	// Status 状态：1=启用 / 0=禁用。
-	Status int8 `gorm:"comment:状态(1启用,0禁用);default:1;not null"`
+	Status int8 `json:"status" gorm:"comment:状态(1启用,0禁用);default:1;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，
@@ -212,29 +212,29 @@ func (AdminRule) TableName(namer schema.Namer) string {
 // 字段顺序：业务字段在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type AdminGroup struct {
 	// ID 主键（SQL: int UNSIGNED）。
-	ID uint `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID uint `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Pid 上级分组 ID；nil 表示顶级（无父节点）。
-	Pid *uint `gorm:"comment:上级分组"`
+	Pid *uint `json:"pid" gorm:"comment:上级分组"`
 
 	// Name 组名。
-	Name string `gorm:"comment:组名;size:100;default:'';not null"`
+	Name string `json:"name" gorm:"comment:组名;size:100;default:'';not null"`
 
 	// Rules 权限规则 ID 集：逗号分隔的 admin_rule.id 列表，'*' 表示全权限（超管）；
 	// 可空：nil 表示"未配置任何规则"。
-	Rules *string `gorm:"comment:权限规则ID集;type:text"`
+	Rules *string `json:"rules" gorm:"comment:权限规则ID集;type:text"`
 
 	// Status 状态：1=启用 / 0=禁用。
-	Status int8 `gorm:"comment:状态(1启用,0禁用);default:1;not null"`
+	Status int8 `json:"status" gorm:"comment:状态(1启用,0禁用);default:1;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，
@@ -261,19 +261,19 @@ func (AdminGroup) TableName(namer schema.Namer) string {
 // 字段顺序：复合主键在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type AdminGroupAccess struct {
 	// Uid 管理员 ID（复合主键之一）。
-	Uid uint `gorm:"comment:管理员ID;primaryKey;not null"`
+	Uid uint `json:"uid" gorm:"comment:管理员ID;primaryKey;not null"`
 
 	// GroupID 分组 ID（复合主键之一）。
-	GroupID uint `gorm:"comment:分组ID;primaryKey;not null"`
+	GroupID uint `json:"group_id" gorm:"comment:分组ID;primaryKey;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，

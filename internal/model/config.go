@@ -26,52 +26,52 @@ import (
 // 字段顺序：业务字段在前、UpdatedAt → CreatedAt → DeletedAt 收尾。
 type Config struct {
 	// ID 主键（SQL: int UNSIGNED）。
-	ID uint `gorm:"comment:ID;primaryKey;autoIncrement"`
+	ID uint `json:"id" gorm:"comment:ID;primaryKey;autoIncrement"`
 
 	// Name 变量名，全局唯一。
-	Name string `gorm:"comment:变量名;size:30;uniqueIndex;not null"`
+	Name string `json:"name" gorm:"comment:变量名;size:30;uniqueIndex;not null"`
 
 	// Group 分组；用于后台【系统配置】按类目渲染。
-	Group string `gorm:"comment:分组;size:30;default:'';not null"`
+	Group string `json:"group" gorm:"comment:分组;size:30;default:'';not null"`
 
 	// Title 变量标题；后台表单显示名。
-	Title string `gorm:"comment:变量标题;size:50;default:'';not null"`
+	Title string `json:"title" gorm:"comment:变量标题;size:50;default:'';not null"`
 
 	// Tip 变量描述；后台表单 placeholder / helper。
-	Tip string `gorm:"comment:变量描述;size:100;default:'';not null"`
+	Tip string `json:"tip" gorm:"comment:变量描述;size:100;default:'';not null"`
 
 	// Type 变量输入组件类型（text / textarea / number / select / image ...）。
-	Type string `gorm:"comment:变量输入组件类型;size:30;default:'';not null"`
+	Type string `json:"type" gorm:"comment:变量输入组件类型;size:30;default:'';not null"`
 
 	// Value 变量值；nil 表示「未设置」，与空字符串不同。
-	Value *string `gorm:"comment:变量值;type:longtext"`
+	Value *string `json:"value" gorm:"comment:变量值;type:longtext"`
 
 	// Content 字典数据；Type 为 select / radio / checkbox 时存选项 JSON。
-	Content *string `gorm:"comment:字典数据;type:longtext"`
+	Content *string `json:"content" gorm:"comment:字典数据;type:longtext"`
 
 	// Rule 验证规则。
-	Rule string `gorm:"comment:验证规则;size:100;default:'';not null"`
+	Rule string `json:"rule" gorm:"comment:验证规则;size:100;default:'';not null"`
 
 	// Extend 扩展属性。
-	Extend string `gorm:"comment:扩展属性;size:255;default:'';not null"`
+	Extend string `json:"extend" gorm:"comment:扩展属性;size:255;default:'';not null"`
 
 	// InputExtend 输入框扩展属性。
-	InputExtend string `gorm:"comment:输入框扩展属性;size:255;default:'';not null"`
+	InputExtend string `json:"input_extend" gorm:"comment:输入框扩展属性;size:255;default:'';not null"`
 
 	// AllowDel 是否允许后台删除：true=是, false=否。
-	AllowDel bool `gorm:"comment:允许删除;default:false;not null"`
+	AllowDel bool `json:"allow_del" gorm:"comment:允许删除;default:false;not null"`
 
 	// Weigh 权重；后台列表按 weigh DESC 排序。
-	Weigh int `gorm:"comment:权重;default:0;not null"`
+	Weigh int `json:"weigh" gorm:"comment:权重;default:0;not null"`
 
 	// UpdatedAt 更新时间（GORM 自动维护）。
-	UpdatedAt time.Time `gorm:"comment:更新时间;not null;autoUpdateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"comment:更新时间;not null;autoUpdateTime"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 
 	// DeletedAt 软删除标记（GORM 自动维护；Valid=true 即已删除）。
-	DeletedAt gorm.DeletedAt `gorm:"comment:删除时间;index"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"comment:删除时间;index"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，

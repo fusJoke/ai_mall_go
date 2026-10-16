@@ -19,21 +19,21 @@ import (
 // 业务字段在前，时间戳字段收尾。
 type Captcha struct {
 	// Key 验证码查询键 / 唯一令牌，提交验证时由客户端携带；主键，字符串类型。
-	Key string `gorm:"comment:验证令牌;primaryKey;size:64"`
+	Key string `json:"key" gorm:"comment:验证令牌;primaryKey;size:64"`
 
 	// Code 加密后的验证码值；文本类验证码使用，点选类验证码留空；nil 表示未设置。
-	Code *string `gorm:"comment:验证码值(已加密,文本类使用);size:255"`
+	Code *string `json:"code" gorm:"comment:验证码值(已加密,文本类使用);size:255"`
 
 	// Info 验证码详情 JSON；点选类验证码存储元素坐标+文字 JSON+图片宽高，
 	// 用于核对点击位置准确性；文本类验证码留空；nil 表示未设置。
 	// 用 string 存 JSON 字符串而非 MySQL 原生 JSON 列，便于跨库兼容与 GORM 透传。
-	Info *string `gorm:"comment:验证码详情JSON(点选类使用);type:text"`
+	Info *string `json:"info" gorm:"comment:验证码详情JSON(点选类使用);type:text"`
 
 	// ExpiresAt 过期时间；过期清理 SQL：DELETE FROM captchas WHERE expires_at < NOW()。
-	ExpiresAt time.Time `gorm:"comment:过期时间;not null;index"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"comment:过期时间;not null;index"`
 
 	// CreatedAt 创建时间（GORM 自动维护）。
-	CreatedAt time.Time `gorm:"comment:创建时间;not null;autoCreateTime"`
+	CreatedAt time.Time `json:"created_at" gorm:"comment:创建时间;not null;autoCreateTime"`
 }
 
 // TableName 实现 schema.TablerWithNamer 接口 —— 由 GORM 传入带前缀配置的 namer，
